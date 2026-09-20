@@ -1,0 +1,32 @@
+@baseUrl = http://localhost:8080
+@accountId = 018f0000-0000-7000-8000-000000000001
+
+### Check service and database health
+GET {{baseUrl}}/actuator/health
+
+### List local accounts
+GET {{baseUrl}}/api/accounts?page=0&size=25
+
+### Create an account
+POST {{baseUrl}}/api/accounts
+Content-Type: application/json
+
+{
+  "name": "Harbour Coffee",
+  "currency": "INR"
+}
+
+### Read Northstar Commerce (local profile)
+GET {{baseUrl}}/api/accounts/{{accountId}}
+
+### Read its balance
+GET {{baseUrl}}/api/accounts/{{accountId}}/balance
+
+### Show validation errors
+POST {{baseUrl}}/api/accounts
+Content-Type: application/json
+
+{
+  "name": "",
+  "currency": "XYZ"
+}
