@@ -1,6 +1,7 @@
 package dev.ledger.api;
 
 import dev.ledger.account.AccountNotFoundException;
+import dev.ledger.idempotency.IdempotencyException;
 import dev.ledger.transfer.TransferNotFoundException;
 import dev.ledger.transfer.TransferRejectedException;
 import java.util.LinkedHashMap;
@@ -13,6 +14,18 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+    @ExceptionHandler(IdempotencyException.class)
+    public ResponseEntity<ProblemDetail> idempotencyError(IdempotencyException exception) {
+        var problem = ProblemDetail.forStatusAndDetail(exception.getStatus(), exception.getMessage());
+        problem.setTitle("Idempotency error");
+        problem.setProperty("code", exception.getCode());
+        var response = ResponseEntity.status(exception.getStatus());
+        if (exception.getStatus() == HttpStatus.CONFLICT) {
+            response.header(HttpHeaders.RETRY_AFTER, "1");
+        }
+        return response.body(problem);
+    }
+
     @ExceptionHandler(TransferRejectedException.class)
     public ProblemDetail transferRejected(TransferRejectedException exception) {
         var problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, exception.getMessage());

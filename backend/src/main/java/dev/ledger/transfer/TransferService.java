@@ -23,7 +23,8 @@ public class TransferService {
         this.ledger = ledger;
     }
 
-    @Transactional
+    // These business rejections occur before any money write. The caller may persist their response.
+    @Transactional(noRollbackFor = {TransferRejectedException.class, AccountNotFoundException.class})
     public TransferResponse create(CreateTransferRequest request) {
         UUID fromId = request.fromAccountId();
         UUID toId = request.toAccountId();
