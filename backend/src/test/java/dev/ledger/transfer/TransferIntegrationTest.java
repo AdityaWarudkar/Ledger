@@ -118,10 +118,10 @@ class TransferIntegrationTest {
         for (String amount : new String[]{"null", "0", "-1", "1.5", "1e2", "\"1.5\"", "\"9223372036854775808\""}) {
             String payload = "{\"fromAccountId\":\"" + from + "\",\"toAccountId\":\"" + to
                     + "\",\"amountMinor\":" + amount + "}";
-            mvc.perform(post("/api/transfers").contentType(APPLICATION_JSON).content(payload))
+            mvc.perform(post("/api/transfers").header("Idempotency-Key", UUID.randomUUID().toString()).contentType(APPLICATION_JSON).content(payload))
                     .andExpect(status().isBadRequest());
         }
-        mvc.perform(post("/api/transfers").contentType(APPLICATION_JSON).content("{}"))
+        mvc.perform(post("/api/transfers").header("Idempotency-Key", UUID.randomUUID().toString()).contentType(APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest());
         assertNoTransfersFrom(from);
     }
@@ -150,7 +150,7 @@ class TransferIntegrationTest {
 
     @Test
     void returnsNotFoundForMissingAccountsAndTransfers() throws Exception {
-        mvc.perform(post("/api/transfers").contentType(APPLICATION_JSON)
+        mvc.perform(post("/api/transfers").header("Idempotency-Key", UUID.randomUUID().toString()).contentType(APPLICATION_JSON)
                         .content(payload(from, UUID.randomUUID(), "100")))
                 .andExpect(status().isNotFound());
         mvc.perform(get("/api/transfers/{id}", UUID.randomUUID())).andExpect(status().isNotFound());
@@ -184,7 +184,7 @@ class TransferIntegrationTest {
     }
 
     @Test
-    void repeatedRequestsExecuteAgainUntilIdempotencyIsImplemented() throws Exception {
+    void distinctKeysCreateDistinctTransfers() throws Exception {
         UUID first = transfer(from, to, "100");
         UUID second = transfer(from, to, "100");
         assertThat(second).isNotEqualTo(first);
@@ -205,7 +205,7 @@ class TransferIntegrationTest {
                 """.formatted(to));
         jdbc.execute("CREATE TRIGGER test_reject_credit BEFORE INSERT ON ledger_entries FOR EACH ROW EXECUTE FUNCTION test_reject_credit()");
         try {
-            assertThatThrownBy(() -> mvc.perform(post("/api/transfers").contentType(APPLICATION_JSON)
+            assertThatThrownBy(() -> mvc.perform(post("/api/transfers").header("Idempotency-Key", UUID.randomUUID().toString()).contentType(APPLICATION_JSON)
                     .content(payload(from, to, "100")))).isInstanceOf(ServletException.class);
         } finally {
             jdbc.execute("DROP TRIGGER test_reject_credit ON ledger_entries");
@@ -281,7 +281,7 @@ class TransferIntegrationTest {
     }
 
     private UUID transfer(UUID source, UUID destination, String amount) throws Exception {
-        var response = mvc.perform(post("/api/transfers").contentType(APPLICATION_JSON)
+        var response = mvc.perform(post("/api/transfers").header("Idempotency-Key", UUID.randomUUID().toString()).contentType(APPLICATION_JSON)
                         .content(payload(source, destination, amount)))
                 .andExpect(status().isCreated()).andReturn().getResponse();
         UUID id = UUID.fromString(mapper.readTree(response.getContentAsString()).get("id").asText());
@@ -290,7 +290,7 @@ class TransferIntegrationTest {
     }
 
     private void rejected(UUID source, UUID destination, String amount, String code) throws Exception {
-        mvc.perform(post("/api/transfers").contentType(APPLICATION_JSON).content(payload(source, destination, amount)))
+        mvc.perform(post("/api/transfers").header("Idempotency-Key", UUID.randomUUID().toString()).contentType(APPLICATION_JSON).content(payload(source, destination, amount)))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.code").value(code));

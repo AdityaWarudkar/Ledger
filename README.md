@@ -1,9 +1,9 @@
 # Ledger
 
 A payments ledger service with an operations dashboard, built in eight phases.
-Phases 1 and 2 implement accounts, atomic transfers, an immutable double-entry
-ledger, and reconciliation. Idempotency, webhooks, and the Next.js dashboard
-are subsequent phases.
+Phases 1–3 implement accounts, atomic transfers, an immutable double-entry
+ledger, reconciliation, and persistent idempotency keys. Webhooks and the
+Next.js dashboard are subsequent phases.
 
 ## Run locally
 
@@ -75,6 +75,12 @@ failures or skips. The existing Phase 1 database upgraded through Flyway to V2.
 A live INR 125.00 demo transfer produced exactly two opposite entries, and
 reconciliation returned `balanced: true` with no mismatched accounts.
 
+Phase 3 verification: all 38 integration tests passed with no failures or skips.
+The running service upgraded to V3. A demo request replayed the identical 201
+response before and after restarting the backend, while a changed payload
+returned 422. Its transfer still had exactly two entries and reconciliation
+remained balanced.
+
 Configuration: `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` override the local
 database defaults. The `local` Spring profile adds sample accounts through a
 separate Flyway location. Use a separate database for each environment; do not
@@ -117,7 +123,9 @@ REST Client extension.
 For example, move INR 125.00 from Northstar Commerce to Monsoon Supply Co.:
 
 ```powershell
+$transferKey = [guid]::NewGuid().ToString()
 Invoke-RestMethod http://localhost:8080/api/transfers -Method Post `
+  -Headers @{ 'Idempotency-Key' = $transferKey } `
   -ContentType 'application/json' `
   -Body '{"fromAccountId":"018f0000-0000-7000-8000-000000000001","toAccountId":"018f0000-0000-7000-8000-000000000002","amountMinor":"12500"}'
 ```
@@ -129,9 +137,10 @@ amounts exceeding `9223372036854775807` are rejected. Currency comes from the
 accounts; cross-currency transfers are rejected. Both accounts must be active
 merchants. Public account creation always creates a merchant.
 
-Phase 2 does not implement idempotency. Each successful POST moves money again,
-even with an `Idempotency-Key` header. Do not automatically retry a request whose
-outcome is unknown. The next phase will make retries safe.
+`Idempotency-Key` is required for every transfer. Keep the same key and payload
+when retrying, including after a network failure. Generate a new key only for a
+new transfer. In the PowerShell example, reuse `$transferKey` when repeating
+the request; do not rerun the line that generates it.
 
 Only completed transfers are stored in this phase. Business rejections return
 422 Problem Details with a stable `code` such as `INSUFFICIENT_BALANCE`,
@@ -139,6 +148,55 @@ Only completed transfers are stored in this phase. Business rejections return
 `BALANCE_LIMIT`. Missing accounts return 404; invalid request fields return 400.
 Rejected requests do not change balances or create journal rows. Failed-event
 recording will be added with the outbox phase.
+
+## Idempotency
+
+Keys are case-sensitive, 1–128 characters, using letters, digits, `.`, `_`, `:`,
+or `-`. UUIDs are a convenient choice. Missing, duplicate, or invalid keys return
+400. Keys currently belong to the transfer endpoint globally; this local service
+has no authenticated tenant scope. An authenticated deployment must scope keys
+to the caller before exposing stored responses.
+
+| Request | Response and ledger effect |
+| --- | --- |
+| New key, valid transfer | 201; one transfer and two entries; `Idempotency-Replayed: false` |
+| Same key and payload | Original status, body, content type, and Location; no new entries; `Idempotency-Replayed: true` |
+| Same key, different valid payload | 422 with `IDEMPOTENCY_KEY_REUSED`; original response is preserved |
+| Same key while the first transaction is open | Waits up to five seconds; then replays or returns 409 with `IDEMPOTENCY_IN_PROGRESS` and `Retry-After: 1` |
+| Business rejection or missing account | Stores the original 422 or 404; later retries replay it even if account state changes |
+| Invalid JSON or request fields | 400; no key is reserved |
+| Database failure before commit | Key, transfer, entries, and balance updates roll back together; the same key can be retried |
+
+Request fingerprints use SHA-256 over the parsed source UUID, destination UUID,
+and integer amount. Field order, JSON whitespace, and integer strings versus
+JSON integers do not change the fingerprint. Any change to a transfer field
+does. Request validation happens before claiming the key.
+
+The original JSON body is stored as text, rather than reconstructed from the
+transfer later. This preserves timestamp precision and the original response
+after a restart or an account-state change. Replays retain 201 for an originally
+created transfer. Transport headers such as Date are not persisted.
+
+The key claim, response, and transfer use one PostgreSQL transaction. A unique
+key constraint with `INSERT ... ON CONFLICT DO NOTHING` arbitrates concurrent
+requests across application instances. After the winning transaction commits,
+the next statement reads its saved response at READ COMMITTED isolation. If it
+rolls back, a waiting insert can claim the key and perform the transfer. This
+avoids a separate cache or a durable processing flag that could get stuck after
+a crash. See PostgreSQL's [transaction isolation documentation](https://www.postgresql.org/docs/17/transaction-iso.html).
+
+A deferred database constraint prevents incomplete claims from committing.
+Completed responses cannot be edited or deleted. Keys do not expire in this
+phase; retaining them avoids unexpectedly treating an old retry as a new
+transfer. A production retention policy must define that boundary explicitly.
+Business exceptions are raised before money writes and are caught to save the
+rejection response. Unexpected exceptions still roll back the whole transaction.
+
+The test suite includes eight simultaneous requests with one key, different
+payloads racing for a key, a waiter observing commit or rollback, the five-second
+timeout, cached rejections, and a database failure while saving the response.
+
+## Ledger history and reconciliation
 
 Ledger amounts are signed: a debit reduces an account balance and a credit
 increases it. Entry IDs and amounts are strings in JSON. History is ordered by
@@ -202,7 +260,7 @@ and [Flyway PostgreSQL support](https://documentation.red-gate.com/flyway/refere
 
 1. Accounts and project setup (implemented).
 2. Double-entry ledger and transfers (implemented).
-3. Idempotency keys and replay behavior.
+3. Idempotency keys and replay behavior (implemented).
 4. Concurrency safety and invariant tests.
 5. Transactional outbox, webhook worker, and test receiver.
 6. Approved design tokens and wireframes, frontend foundation, account screens.

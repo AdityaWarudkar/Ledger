@@ -1,15 +1,28 @@
 @baseUrl = http://localhost:8080
 @northstar = 018f0000-0000-7000-8000-000000000001
 @monsoon = 018f0000-0000-7000-8000-000000000002
+@transferKey = northstar-monsoon-125-v1
 
-### Send INR 125.00; running this request again transfers another INR 125.00
+### Send INR 125.00; rerun to replay the original response without moving money again
 POST {{baseUrl}}/api/transfers
 Content-Type: application/json
+Idempotency-Key: {{transferKey}}
 
 {
   "fromAccountId": "{{northstar}}",
   "toAccountId": "{{monsoon}}",
   "amountMinor": "12500"
+}
+
+### Reusing the key with a different amount returns 422 IDEMPOTENCY_KEY_REUSED
+POST {{baseUrl}}/api/transfers
+Content-Type: application/json
+Idempotency-Key: {{transferKey}}
+
+{
+  "fromAccountId": "{{northstar}}",
+  "toAccountId": "{{monsoon}}",
+  "amountMinor": "12501"
 }
 
 ### List normal transfers for Northstar
@@ -27,6 +40,7 @@ GET {{baseUrl}}/api/system/reconciliation
 ### Demonstrate insufficient balance
 POST {{baseUrl}}/api/transfers
 Content-Type: application/json
+Idempotency-Key: northstar-insufficient-v1
 
 {
   "fromAccountId": "{{northstar}}",
