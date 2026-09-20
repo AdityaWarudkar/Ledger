@@ -1,8 +1,8 @@
 # Ledger
 
 A payments ledger service with an operations dashboard, built in eight phases.
-Phases 1–3 implement accounts, atomic transfers, an immutable double-entry
-ledger, reconciliation, and persistent idempotency keys. Webhooks and the
+Phases 1–4 implement accounts, atomic transfers, an immutable double-entry
+ledger, reconciliation, persistent idempotency keys, and concurrency tests. Webhooks and the
 Next.js dashboard are subsequent phases.
 
 ## Run locally
@@ -67,8 +67,8 @@ unavailable rather than silently skipping database verification.
 The transfer tests cover exact debit/credit posting, insufficient funds, inactive
 accounts, currency mismatch, amount precision and overflow, database failure
 rollback, immutable history, deferred journal constraints, paginated running
-balances, and reconciliation drift. The larger concurrency suite belongs to
-Phase 4; load-test results belong to Phase 8.
+balances, and reconciliation drift. The concurrency suite exercises competing
+writers and verifies ledger invariants. Load-test results belong to Phase 8.
 
 Phase 2 verification: Java 21 `mvnw verify` passed 24 integration tests with no
 failures or skips. The existing Phase 1 database upgraded through Flyway to V2.
@@ -80,6 +80,57 @@ The running service upgraded to V3. A demo request replayed the identical 201
 response before and after restarting the backend, while a changed payload
 returned 422. Its transfer still had exactly two entries and reconciliation
 remained balanced.
+
+Phase 4 verification: all 46 integration tests passed with no failures or skips,
+including eight concurrency cases. The batch scenarios made 1,140 requests
+through the transactional idempotency service using twelve worker threads.
+No deadlocks, lost updates, negative merchant balances, or reconciliation
+mismatches were observed. The existing runtime locking implementation passed;
+this phase adds regression tests and documents its guarantees.
+
+## Concurrency checks
+
+Run only the concurrency suite with Docker running:
+
+```sh
+cd backend
+./mvnw -Dtest=TransferConcurrencyTest test
+```
+
+On Windows, use `.\mvnw.cmd`. The tests start an isolated PostgreSQL container;
+they do not change the accounts in the local Compose database.
+
+| Scenario | Check |
+| --- | --- |
+| 60 competing debits with distinct keys | A balance of 1,000 minor units funds exactly ten transfers of 100; fifty are rejected |
+| 240 opposite-direction transfers | Both accounts return to their initial balances and every request completes |
+| 240 transfers across six accounts, for each of three fixed random seeds | Each final balance matches an independently calculated total |
+| 120 requests sharing twenty keys | Exactly twenty transfers; one hundred responses are replays |
+| A completed write held inside an uncommitted transaction | Reconciliation and balance readers see the previous committed state until release |
+| A second debit blocked behind a full-balance debit | After the first commit, the second request sees the exhausted balance and is rejected |
+
+Each scenario checks merchant totals per currency, nonnegative balances, exactly
+two balanced entries per transfer, zero net ledger entries, historical running
+balances, and account-by-account reconciliation. Clearing balances participate
+in ledger checks but are excluded from the merchant nonnegative-balance rule.
+
+Worker threads start together at a barrier and call the real Spring transactional
+services. Controlled blocking tests use latches and PostgreSQL lock observations
+instead of guessing with sleeps. Worker results must complete within a deadline;
+exceptions are propagated to the test. The normal ten-connection pool also means
+the twelve workers exercise connection queuing. Existing MockMvc tests cover
+the HTTP contract separately.
+
+The lock order is Java's `UUID.compareTo` order, consistently applied to both
+accounts before validating balances. Future money writers must use that exact
+order; it should not be mixed with PostgreSQL's UUID sort order. Locks remain
+held until the enclosing idempotency transaction commits or rolls back. Each
+request runs at READ COMMITTED; reconciliation uses a separate REPEATABLE READ
+snapshot so its multiple queries see one committed database state.
+
+These tests establish regression evidence for the exercised workloads. They
+are not throughput measurements or proof across every possible schedule.
+The k6 phase will measure HTTP throughput and tail latency separately.
 
 Configuration: `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` override the local
 database defaults. The `local` Spring profile adds sample accounts through a
@@ -261,7 +312,7 @@ and [Flyway PostgreSQL support](https://documentation.red-gate.com/flyway/refere
 1. Accounts and project setup (implemented).
 2. Double-entry ledger and transfers (implemented).
 3. Idempotency keys and replay behavior (implemented).
-4. Concurrency safety and invariant tests.
+4. Concurrency safety and invariant tests (implemented).
 5. Transactional outbox, webhook worker, and test receiver.
 6. Approved design tokens and wireframes, frontend foundation, account screens.
 7. Transfer demo, transfers, and webhook screens.
