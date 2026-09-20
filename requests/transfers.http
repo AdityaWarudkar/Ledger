@@ -1,0 +1,35 @@
+@baseUrl = http://localhost:8080
+@northstar = 018f0000-0000-7000-8000-000000000001
+@monsoon = 018f0000-0000-7000-8000-000000000002
+
+### Send INR 125.00; running this request again transfers another INR 125.00
+POST {{baseUrl}}/api/transfers
+Content-Type: application/json
+
+{
+  "fromAccountId": "{{northstar}}",
+  "toAccountId": "{{monsoon}}",
+  "amountMinor": "12500"
+}
+
+### List normal transfers for Northstar
+GET {{baseUrl}}/api/transfers?accountId={{northstar}}&kind=TRANSFER&page=0&size=25
+
+### Read opening funding and its two entries
+GET {{baseUrl}}/api/transfers/018f0000-0000-7000-8000-000000000010
+
+### Read Northstar's complete ledger, including its opening credit
+GET {{baseUrl}}/api/accounts/{{northstar}}/entries?page=0&size=25
+
+### Check balances against the ledger
+GET {{baseUrl}}/api/system/reconciliation
+
+### Demonstrate insufficient balance
+POST {{baseUrl}}/api/transfers
+Content-Type: application/json
+
+{
+  "fromAccountId": "{{northstar}}",
+  "toAccountId": "{{monsoon}}",
+  "amountMinor": "9223372036854775807"
+}

@@ -1,8 +1,9 @@
 # Ledger
 
 A payments ledger service with an operations dashboard, built in eight phases.
-Phase 1 implements accounts, PostgreSQL migrations, and the backend foundation.
-Transfers, ledger entries, webhooks, and the Next.js dashboard are subsequent phases.
+Phases 1 and 2 implement accounts, atomic transfers, an immutable double-entry
+ledger, and reconciliation. Idempotency, webhooks, and the Next.js dashboard
+are subsequent phases.
 
 ## Run locally
 
@@ -16,8 +17,10 @@ curl http://localhost:8080/api/accounts
 
 The first build downloads Java and Maven images. The API listens on port 8080;
 PostgreSQL is exposed on port 15432 to avoid clashing with local installations.
-Both ports are bound to localhost. Four local
-sample accounts are created, all with zero balances. There is no dashboard yet.
+Both ports are bound to localhost. The local profile creates four merchant
+accounts and one clearing account. Northstar Commerce starts with INR 25,000.00,
+backed by a funding journal that debits the clearing account by the same amount.
+Other merchants start at zero. There is no dashboard yet.
 
 ```sh
 curl -i http://localhost:8080/api/accounts \
@@ -61,10 +64,16 @@ HTTP validation, persistence, pagination, missing accounts, exact money
 serialization, and the database overdraft constraint. Tests fail when Docker is
 unavailable rather than silently skipping database verification.
 
-Phase 1 verification: Java 21 `mvnw verify` passed all seven integration tests
-with no skips. The Compose image built and started, `/actuator/health` returned
-`UP`, and `/api/accounts` returned the four locally seeded accounts. Transfer
-invariants and load-test results will be added in their respective phases.
+The transfer tests cover exact debit/credit posting, insufficient funds, inactive
+accounts, currency mismatch, amount precision and overflow, database failure
+rollback, immutable history, deferred journal constraints, paginated running
+balances, and reconciliation drift. The larger concurrency suite belongs to
+Phase 4; load-test results belong to Phase 8.
+
+Phase 2 verification: Java 21 `mvnw verify` passed 24 integration tests with no
+failures or skips. The existing Phase 1 database upgraded through Flyway to V2.
+A live INR 125.00 demo transfer produced exactly two opposite entries, and
+reconciliation returned `balanced: true` with no mismatched accounts.
 
 Configuration: `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` override the local
 database defaults. The `local` Spring profile adds sample accounts through a
@@ -95,13 +104,91 @@ return 404. Malformed JSON and invalid UUIDs return 400.
 Runnable examples are in `requests/accounts.http` for IntelliJ or the VS Code
 REST Client extension.
 
+## Transfers and ledger
+
+| Method | Path | Result |
+| --- | --- | --- |
+| POST | `/api/transfers` | Posts a transfer; 201 with Location |
+| GET | `/api/transfers?page=0&size=25` | Transfers, newest first; optional `accountId` and `kind` filters |
+| GET | `/api/transfers/{id}` | Transfer details and its two ledger entries |
+| GET | `/api/accounts/{id}/entries?page=0&size=25` | Ledger history, newest posting first, including running balances |
+| GET | `/api/system/reconciliation` | Balance mismatches and net ledger amount per currency |
+
+For example, move INR 125.00 from Northstar Commerce to Monsoon Supply Co.:
+
+```powershell
+Invoke-RestMethod http://localhost:8080/api/transfers -Method Post `
+  -ContentType 'application/json' `
+  -Body '{"fromAccountId":"018f0000-0000-7000-8000-000000000001","toAccountId":"018f0000-0000-7000-8000-000000000002","amountMinor":"12500"}'
+```
+
+Send amounts as decimal integer strings, in minor units. The backend also
+accepts JSON integers, but JavaScript clients should use strings to avoid
+rounding before the request is sent. Fractions, zero, negative values, and
+amounts exceeding `9223372036854775807` are rejected. Currency comes from the
+accounts; cross-currency transfers are rejected. Both accounts must be active
+merchants. Public account creation always creates a merchant.
+
+Phase 2 does not implement idempotency. Each successful POST moves money again,
+even with an `Idempotency-Key` header. Do not automatically retry a request whose
+outcome is unknown. The next phase will make retries safe.
+
+Only completed transfers are stored in this phase. Business rejections return
+422 Problem Details with a stable `code` such as `INSUFFICIENT_BALANCE`,
+`ACCOUNT_INACTIVE`, `CURRENCY_MISMATCH`, `CLEARING_ACCOUNT`, `SAME_ACCOUNT`, or
+`BALANCE_LIMIT`. Missing accounts return 404; invalid request fields return 400.
+Rejected requests do not change balances or create journal rows. Failed-event
+recording will be added with the outbox phase.
+
+Ledger amounts are signed: a debit reduces an account balance and a credit
+increases it. Entry IDs and amounts are strings in JSON. History is ordered by
+posting sequence, not wall-clock time. Running balances include the complete
+history before pagination, so page two does not restart at zero.
+
+`FUNDING` journals identify local opening credits; normal API transfers use
+`TRANSFER`. Clearing accounts are explicitly marked with `kind: CLEARING` in
+account responses. Only clearing accounts may have a negative balance, and the
+transfer API rejects them as either sender or recipient. This represents the
+external side of demo funding; it is not a production deposit API. The local
+funding script uses a fixed journal ID and does not fund again on restart.
+
+Reconciliation reads a consistent database snapshot. It reports `balanced: true`
+only when every cached account balance matches its entry sum and each currency's
+entries net to zero. It reports discrepancies without repairing or hiding them.
+Aggregate arithmetic uses PostgreSQL `NUMERIC`, so totals across many accounts
+cannot overflow a Java `long`. Accounts with no entries reconcile to zero.
+
 ## Design choices
 
 Requests pass through a controller, a transactional service, and a JPA repository.
 Flyway owns the schema; Hibernate validates it on startup instead of changing it.
-Database checks enforce supported currencies, statuses, and nonnegative balances.
-There is no balance mutation endpoint. Funding and transfers must produce ledger
-entries, which arrive in Phase 2.
+Database checks enforce supported currencies, statuses, and nonnegative merchant
+balances. There is no public funding or balance mutation endpoint.
+
+A transfer locks both account rows in Java UUID order, checks the current
+balances, updates them, and inserts its journal in one database transaction.
+Consistent ordering prevents opposite-direction transfers from locking the same
+pair in opposite orders. Row locks keep the balance check valid until commit.
+Optimistic locking would require retrying contended writes; explicit row locks
+are easier to reason about for this short transaction. No network calls occur
+inside it. All future money writers must use the same ordering. See PostgreSQL's
+[locking guidance](https://www.postgresql.org/docs/17/explicit-locking.html).
+
+JPA manages accounts and transfers. A small JDBC repository writes and queries
+ledger entries using the same Spring-managed transaction. PostgreSQL rejects
+updates, deletes, and truncation of posted history. Composite foreign keys keep
+account, transfer, and entry currencies consistent. Deferred constraint triggers
+require exactly two entries with the transfer's specified accounts and amounts
+at commit; a missing credit cannot commit even if application code forgets it.
+The checks are deferred because the transfer row is inserted before its entries.
+See [constraint triggers](https://www.postgresql.org/docs/17/sql-createtrigger.html).
+Corrections must be new compensating transfers, not edits to existing entries.
+
+The runtime currently shares the local database owner's credentials. A database
+owner can disable triggers; separate migration/runtime roles belong in production
+hardening. Cached balances are maintained by the service, and reconciliation
+detects direct SQL drift. The migration does not invent ledger history for any
+balances manually changed before Phase 2.
 
 Offset pagination keeps the initial API simple, with an ID tiebreaker for stable
 ordering. Cursor pagination is a reasonable later change for larger datasets.
@@ -114,7 +201,7 @@ and [Flyway PostgreSQL support](https://documentation.red-gate.com/flyway/refere
 ## Next phases
 
 1. Accounts and project setup (implemented).
-2. Double-entry ledger and transfers.
+2. Double-entry ledger and transfers (implemented).
 3. Idempotency keys and replay behavior.
 4. Concurrency safety and invariant tests.
 5. Transactional outbox, webhook worker, and test receiver.
