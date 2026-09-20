@@ -1,0 +1,6 @@
+INSERT INTO accounts (id, name, currency, status, created_at) VALUES
+    ('018f0000-0000-7000-8000-000000000001', 'Northstar Commerce', 'INR', 'ACTIVE', '2026-09-14T09:15:00Z'),
+    ('018f0000-0000-7000-8000-000000000002', 'Monsoon Supply Co.', 'INR', 'ACTIVE', '2026-09-15T11:40:00Z'),
+    ('018f0000-0000-7000-8000-000000000003', 'Fieldwork Studio', 'USD', 'ACTIVE', '2026-09-16T08:20:00Z'),
+    ('018f0000-0000-7000-8000-000000000004', 'Papertrail Books', 'INR', 'FROZEN', '2026-09-17T14:05:00Z')
+ON CONFLICT (id) DO NOTHING;
