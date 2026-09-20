@@ -20,6 +20,10 @@ public class Account {
     @Column(nullable = false, length = 16)
     private AccountStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private AccountKind kind;
+
     @Column(name = "balance_minor", nullable = false)
     private long balanceMinor;
 
@@ -33,6 +37,7 @@ public class Account {
         this.name = name;
         this.currency = currency;
         this.status = AccountStatus.ACTIVE;
+        this.kind = AccountKind.MERCHANT;
         this.balanceMinor = 0;
         this.createdAt = Instant.now();
     }
@@ -41,6 +46,21 @@ public class Account {
     public String getName() { return name; }
     public String getCurrency() { return currency; }
     public AccountStatus getStatus() { return status; }
+    public AccountKind getKind() { return kind; }
     public long getBalanceMinor() { return balanceMinor; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public void debit(long amountMinor) {
+        if (amountMinor <= 0 || amountMinor > balanceMinor) {
+            throw new IllegalArgumentException("Debit exceeds the available balance");
+        }
+        balanceMinor -= amountMinor;
+    }
+
+    public void credit(long amountMinor) {
+        if (amountMinor <= 0) {
+            throw new IllegalArgumentException("Credit must be positive");
+        }
+        balanceMinor = Math.addExact(balanceMinor, amountMinor);
+    }
 }
