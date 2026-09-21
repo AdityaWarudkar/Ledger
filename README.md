@@ -1,9 +1,9 @@
 # Ledger
 
 A payments ledger service with an operations dashboard, built in eight phases.
-Phases 1–4 implement accounts, atomic transfers, an immutable double-entry
-ledger, reconciliation, persistent idempotency keys, and concurrency tests. Webhooks and the
-Next.js dashboard are subsequent phases.
+Phases 1–5 implement accounts, atomic transfers, an immutable double-entry
+ledger, reconciliation, idempotency, concurrency tests, and webhook delivery.
+The Next.js dashboard is the next phase.
 
 ## Run locally
 
@@ -87,6 +87,13 @@ through the transactional idempotency service using twelve worker threads.
 No deadlocks, lost updates, negative merchant balances, or reconciliation
 mismatches were observed. The existing runtime locking implementation passed;
 this phase adds regression tests and documents its guarantees.
+
+Phase 5 verification: all 59 integration tests passed with no failures or skips.
+The Compose database upgraded to V4. The scheduled worker recorded HTTP 500,
+then HTTP 200 after receiver recovery, then another HTTP 200 on manual replay.
+All three attempts referred to one event; the receiver stored one receipt and
+the ledger remained balanced. Tests also cover dead-letter recovery, timeouts,
+signature rejection, competing claims, stale lease fencing, and outbox rollback.
 
 ## Concurrency checks
 
@@ -197,8 +204,9 @@ Only completed transfers are stored in this phase. Business rejections return
 422 Problem Details with a stable `code` such as `INSUFFICIENT_BALANCE`,
 `ACCOUNT_INACTIVE`, `CURRENCY_MISMATCH`, `CLEARING_ACCOUNT`, `SAME_ACCOUNT`, or
 `BALANCE_LIMIT`. Missing accounts return 404; invalid request fields return 400.
-Rejected requests do not change balances or create journal rows. Failed-event
-recording will be added with the outbox phase.
+Rejected requests do not change balances or create journal rows. A new business
+rejection records a `transfer.failed` outbox event alongside its idempotency
+response. Replaying the rejection does not create another event.
 
 ## Idempotency
 
@@ -267,6 +275,117 @@ entries net to zero. It reports discrepancies without repairing or hiding them.
 Aggregate arithmetic uses PostgreSQL `NUMERIC`, so totals across many accounts
 cannot overflow a Java `long`. Accounts with no entries reconcile to zero.
 
+## Webhooks
+
+Register one endpoint per account before making a transfer. Successful transfers
+create a `transfer.completed` event and a delivery for each registered source or
+destination account. A business rejection creates `transfer.failed` and notifies
+the source account's registered endpoint, if one exists. Invalid requests and
+idempotency conflicts do not create events. Events are retained even when no
+endpoint is registered; registration does not backfill old events. Local opening
+funding and pre-Phase-5 transfers are not backfilled either.
+
+| Method | Path | Result |
+| --- | --- | --- |
+| POST | `/api/webhooks/endpoints` | Register `{accountId, url}`; returns a generated signing secret once |
+| GET | `/api/webhooks/endpoints?page=0&size=25` | Registered endpoints, without secrets |
+| GET | `/api/webhooks/deliveries` | Delivery list; optional `endpointId`, `status`, `page`, and `size` |
+| GET | `/api/webhooks/deliveries/{id}` | Delivery, event payload, and complete attempt history |
+| POST | `/api/webhooks/deliveries/{id}/replay` | Queue a delivered or dead-letter delivery again; 202 |
+
+Lists return JSON arrays with at most 100 rows per page. Delivery states are
+`PENDING`, `PROCESSING`, `RETRY`, `DELIVERED`, and `DEAD_LETTER`. Manual replay
+retains the event ID and all previous attempts while resetting the retry budget.
+Replaying an already pending or processing delivery returns 409.
+
+The default worker polls every second and claims up to ten deliveries serially
+per poll. Each HTTP request has a two-second timeout. All non-2xx responses and
+transport failures are retried up to five total attempts per cycle. Backoff
+doubles from a two-second base, is capped at five minutes, and uses random jitter
+between half and all of that delay. Exhausted deliveries enter `DEAD_LETTER`.
+Attempts record start/end time, status code, latency, error, and the next retry
+time. Unknown outcomes, such as a worker crash, have no invented HTTP status or
+latency.
+
+Outbox events and initial delivery rows are inserted inside the transfer's
+database transaction. The worker claims work with `FOR UPDATE SKIP LOCKED`,
+records an attempt, and commits a 30-second lease before making the HTTP call.
+It then records the outcome in a separate short transaction. Multiple workers
+can claim different rows. An expired lease is recoverable; a unique lease token
+prevents an older worker's result from overwriting a newer attempt. Crashed
+attempts count toward the retry limit. See PostgreSQL's
+[queue-locking behavior](https://www.postgresql.org/docs/17/sql-select.html).
+
+Delivery is at least once, with no ordering guarantee between events. A receiver
+may accept an event even if the sender times out or crashes before recording
+success. Consumers must deduplicate event IDs and commit the deduplication record
+with their business side effects. A successful transfer never waits for HTTP.
+
+### Signatures
+
+Each POST carries `X-Ledger-Event-Id`, `X-Ledger-Endpoint-Id`,
+`X-Ledger-Timestamp`, and `X-Ledger-Signature`. The body is an envelope with
+`id`, `type`, `createdAt`, and `data`. Amounts in `data` remain integer strings.
+
+The timestamp is Unix seconds. Compute HMAC-SHA256 over the UTF-8 bytes of
+`timestamp + "." + rawBody`, using the signing secret's literal UTF-8 bytes
+(do not hex-decode it). The signature is `v1=` followed by lowercase hex. Verify
+the signature with a constant-time comparison, require a timestamp within five
+minutes, and verify that the event header matches the signed body's ID. Each
+retry is signed with its current timestamp, while the event body stays unchanged.
+
+Secrets are random 256-bit values represented as hex and returned only by the
+registration response. This local project stores them in PostgreSQL because the
+sender must retrieve them to sign requests. Production hardening should encrypt
+them using managed keys and restrict access to the database.
+
+### Local receiver demo
+
+The `local` profile enables a built-in receiver. Register this URL when using
+the default Compose ports:
+
+```text
+http://localhost:8080/api/webhooks/test-receiver
+```
+
+Here `localhost` is resolved by the backend container. If the service runs on a
+different internal port, use that port. The receiver configuration is shared
+across local subscriptions and persists in PostgreSQL.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| GET / PUT | `/api/webhooks/test-receiver/behavior` | Read/set `{ "behavior": "HEALTHY" }`, `FAIL`, or `SLOW` |
+| POST | `/api/webhooks/test-receiver` | Verify signatures and record each endpoint/event pair once |
+| GET | `/api/webhooks/test-receiver/receipts` | Inspect deduplicated receipts; optional `endpointId`, `page`, and `size` |
+
+`FAIL` returns HTTP 500 without recording a receipt. `SLOW` waits three seconds
+before accepting, which intentionally exceeds the sender's timeout. `HEALTHY`
+accepts promptly and acknowledges duplicates without applying a second effect.
+The receipt insert is the demo's business side effect. The receiver routes are
+absent outside the local profile.
+
+Use `requests/webhooks.http` to register an endpoint, switch to failure mode,
+send a transfer with a new idempotency key, and inspect retries. Switch back to
+`HEALTHY` to recover. If the retry budget has already run out, replay the
+dead-letter delivery. Replaying a delivered event leaves the receipt count
+unchanged. Finish the demo in `HEALTHY` mode.
+
+### Destination configuration
+
+The worker follows no HTTP redirects and validates the configured host before
+each attempt. Outside the local profile, HTTPS is required and the allowed-host
+list is empty until `WEBHOOK_ALLOWED_HOSTS` is set to a comma-separated list of
+trusted receiver hosts. The local profile permits HTTP only to the configured
+`localhost`, `127.0.0.1`, and `backend` hosts. These are explicit operator-trusted
+destinations, not arbitrary user-supplied URLs. Apply network egress restrictions
+as well when deploying; a host allowlist is not DNS pinning.
+
+`WEBHOOK_WORKER_ENABLED=false` disables scheduling. Request timeout, lease
+duration, retry limits, and polling are configured under `ledger.webhooks` in
+`application.yaml`; the lease must exceed the HTTP timeout by more than a second.
+Tests disable scheduling and invoke the worker deterministically against a real
+HTTP receiver and PostgreSQL.
+
 ## Design choices
 
 Requests pass through a controller, a transactional service, and a JPA repository.
@@ -313,7 +432,7 @@ and [Flyway PostgreSQL support](https://documentation.red-gate.com/flyway/refere
 2. Double-entry ledger and transfers (implemented).
 3. Idempotency keys and replay behavior (implemented).
 4. Concurrency safety and invariant tests (implemented).
-5. Transactional outbox, webhook worker, and test receiver.
+5. Transactional outbox, webhook worker, and test receiver (implemented).
 6. Approved design tokens and wireframes, frontend foundation, account screens.
 7. Transfer demo, transfers, and webhook screens.
 8. Metrics, k6, OpenAPI, full Compose setup, and measured results.

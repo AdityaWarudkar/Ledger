@@ -1,0 +1,58 @@
+@baseUrl = http://localhost:8080
+@northstar = 018f0000-0000-7000-8000-000000000001
+@monsoon = 018f0000-0000-7000-8000-000000000002
+@transferKey = northstar-webhook-demo-v1
+
+### Register once; save the signingSecret from this response
+POST {{baseUrl}}/api/webhooks/endpoints
+Content-Type: application/json
+
+{
+  "accountId": "{{northstar}}",
+  "url": "http://localhost:8080/api/webhooks/test-receiver"
+}
+
+### Set receiver failure mode before creating a new transfer
+PUT {{baseUrl}}/api/webhooks/test-receiver/behavior
+Content-Type: application/json
+
+{ "behavior": "FAIL" }
+
+### Transfer INR 1.00; use a new key for another event
+POST {{baseUrl}}/api/transfers
+Idempotency-Key: {{transferKey}}
+Content-Type: application/json
+
+{
+  "fromAccountId": "{{northstar}}",
+  "toAccountId": "{{monsoon}}",
+  "amountMinor": "100"
+}
+
+### Inspect deliveries; copy an id to deliveryId below
+GET {{baseUrl}}/api/webhooks/deliveries
+
+### Recover the receiver; pending retries will deliver automatically
+PUT {{baseUrl}}/api/webhooks/test-receiver/behavior
+Content-Type: application/json
+
+{ "behavior": "HEALTHY" }
+
+### Slow mode takes 3 seconds and exceeds the worker's 2-second timeout
+PUT {{baseUrl}}/api/webhooks/test-receiver/behavior
+Content-Type: application/json
+
+{ "behavior": "SLOW" }
+
+### Replace with a delivery id from the deliveries list
+@deliveryId = 00000000-0000-0000-0000-000000000000
+GET {{baseUrl}}/api/webhooks/deliveries/{{deliveryId}}
+
+### Replay a delivered or dead-letter delivery; event id and attempt history are retained
+POST {{baseUrl}}/api/webhooks/deliveries/{{deliveryId}}/replay
+
+### A replay of a received event does not create another receipt
+GET {{baseUrl}}/api/webhooks/test-receiver/receipts
+
+### Registered endpoints do not reveal their secrets
+GET {{baseUrl}}/api/webhooks/endpoints
