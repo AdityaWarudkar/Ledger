@@ -5,6 +5,14 @@ Phases 1–5 implement accounts, atomic transfers, an immutable double-entry
 ledger, reconciliation, idempotency, concurrency tests, and webhook delivery.
 The Next.js dashboard is the next phase.
 
+The Phase 6 design proposal is in [docs/dashboard-design.md](docs/dashboard-design.md).
+Frontend implementation is awaiting the design approval requested in the project brief.
+Browser access is configured for `http://localhost:3000` and
+`http://127.0.0.1:3000` in the local profile. Set `FRONTEND_ORIGINS` to an explicit
+comma-separated list for other origins; outside the local profile, the default
+list is empty. CORS covers `/api/**`, exposes the replay and Location headers,
+and does not enable cross-origin credentials. It is not authentication.
+
 ## Run locally
 
 Install Docker Desktop and start its Linux engine, then run from the repository root:
