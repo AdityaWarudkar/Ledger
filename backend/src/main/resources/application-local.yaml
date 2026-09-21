@@ -2,6 +2,8 @@ spring:
   flyway:
     locations: classpath:db/migration,classpath:db/local
 ledger:
+  cors:
+    allowed-origins: ${FRONTEND_ORIGINS:http://localhost:3000,http://127.0.0.1:3000}
   webhooks:
     allowed-hosts: localhost,127.0.0.1,backend
     allow-http: true

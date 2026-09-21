@@ -26,6 +26,8 @@ management:
 server:
   shutdown: graceful
 ledger:
+  cors:
+    allowed-origins: ${FRONTEND_ORIGINS:}
   webhooks:
     worker-enabled: ${WEBHOOK_WORKER_ENABLED:true}
     allowed-hosts: ${WEBHOOK_ALLOWED_HOSTS:}
