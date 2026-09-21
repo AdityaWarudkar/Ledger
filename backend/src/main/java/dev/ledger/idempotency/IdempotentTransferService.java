@@ -6,6 +6,7 @@ import dev.ledger.account.AccountNotFoundException;
 import dev.ledger.transfer.CreateTransferRequest;
 import dev.ledger.transfer.TransferRejectedException;
 import dev.ledger.transfer.TransferService;
+import dev.ledger.webhook.OutboxService;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -22,11 +23,13 @@ public class IdempotentTransferService {
     private final IdempotencyRepository keys;
     private final TransferService transfers;
     private final ObjectMapper mapper;
+    private final OutboxService outbox;
 
-    public IdempotentTransferService(IdempotencyRepository keys, TransferService transfers, ObjectMapper mapper) {
+    public IdempotentTransferService(IdempotencyRepository keys, TransferService transfers, ObjectMapper mapper, OutboxService outbox) {
         this.keys = keys;
         this.transfers = transfers;
         this.mapper = mapper;
+        this.outbox = outbox;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -56,10 +59,12 @@ public class IdempotentTransferService {
             problem.setTitle("Transfer rejected");
             problem.setProperty("code", exception.getCode());
             response = rejection(problem);
+            outbox.failed(key, request, exception.getCode(), exception.getMessage());
         } catch (AccountNotFoundException exception) {
             var problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, exception.getMessage());
             problem.setTitle("Account not found");
             response = rejection(problem);
+            outbox.failed(key, request, "ACCOUNT_NOT_FOUND", exception.getMessage());
         }
         keys.complete(key, response);
         return response;

@@ -25,3 +25,14 @@ management:
         include: health,info
 server:
   shutdown: graceful
+ledger:
+  webhooks:
+    worker-enabled: ${WEBHOOK_WORKER_ENABLED:true}
+    allowed-hosts: ${WEBHOOK_ALLOWED_HOSTS:}
+    allow-http: false
+    request-timeout: 2s
+    lease-duration: 30s
+    base-backoff: 2s
+    max-backoff: 5m
+    max-attempts: 5
+    poll-delay-ms: 1000

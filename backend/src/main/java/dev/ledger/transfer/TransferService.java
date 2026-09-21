@@ -3,6 +3,7 @@ package dev.ledger.transfer;
 import dev.ledger.account.*;
 import dev.ledger.ledger.LedgerRepository;
 import dev.ledger.ledger.LedgerEntryResponse;
+import dev.ledger.webhook.OutboxService;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
@@ -16,11 +17,13 @@ public class TransferService {
     private final AccountRepository accounts;
     private final TransferRepository transfers;
     private final LedgerRepository ledger;
+    private final OutboxService outbox;
 
-    public TransferService(AccountRepository accounts, TransferRepository transfers, LedgerRepository ledger) {
+    public TransferService(AccountRepository accounts, TransferRepository transfers, LedgerRepository ledger, OutboxService outbox) {
         this.accounts = accounts;
         this.transfers = transfers;
         this.ledger = ledger;
+        this.outbox = outbox;
     }
 
     // These business rejections occur before any money write. The caller may persist their response.
@@ -63,7 +66,9 @@ public class TransferService {
         to.credit(amount);
         var transfer = transfers.saveAndFlush(new Transfer(fromId, toId, from.getCurrency(), amount));
         ledger.post(transfer);
-        return TransferResponse.from(transfer);
+        var response = TransferResponse.from(transfer);
+        outbox.completed(response);
+        return response;
     }
 
     private Account lock(UUID id) {

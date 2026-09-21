@@ -2,6 +2,7 @@ package dev.ledger.api;
 
 import dev.ledger.account.AccountNotFoundException;
 import dev.ledger.idempotency.IdempotencyException;
+import dev.ledger.webhook.WebhookException;
 import dev.ledger.transfer.TransferNotFoundException;
 import dev.ledger.transfer.TransferRejectedException;
 import java.util.LinkedHashMap;
@@ -14,6 +15,11 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
+    @ExceptionHandler(WebhookException.class)
+    public ProblemDetail webhookError(WebhookException exception) {
+        return ProblemDetail.forStatusAndDetail(exception.getStatus(), exception.getMessage());
+    }
+
     @ExceptionHandler(IdempotencyException.class)
     public ResponseEntity<ProblemDetail> idempotencyError(IdempotencyException exception) {
         var problem = ProblemDetail.forStatusAndDetail(exception.getStatus(), exception.getMessage());
