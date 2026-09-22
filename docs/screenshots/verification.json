@@ -1,0 +1,25 @@
+{
+  "checkedAt": "2026-09-22T16:55:48.623Z",
+  "result": "PASS",
+  "transferId": "824d42c2-e699-4cb4-b4e1-63087d79f408",
+  "parallelRequests": 2,
+  "balanceDeltaMinor": "100",
+  "deduplicatedReceipts": 1,
+  "reconciliation": {
+    "balanced": true,
+    "checkedAt": "2026-09-22T16:55:48.095767197Z",
+    "currencies": [
+      {
+        "currency": "INR",
+        "entryCount": 18,
+        "netMinor": "0"
+      },
+      {
+        "currency": "USD",
+        "entryCount": 0,
+        "netMinor": "0"
+      }
+    ],
+    "mismatches": []
+  }
+}

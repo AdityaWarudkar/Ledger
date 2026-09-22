@@ -1,12 +1,22 @@
 # Ledger
 
-A payments ledger service with an operations dashboard, built in eight phases.
-Phases 1–5 implement accounts, atomic transfers, an immutable double-entry
-ledger, reconciliation, idempotency, concurrency tests, and webhook delivery.
-The Next.js dashboard is the next phase.
+A payments ledger service with an operations dashboard. All eight phases are
+implemented: exact money, atomic transfers, an immutable double-entry ledger,
+durable idempotency, webhook delivery, a working dashboard, metrics, and measured
+load tests. Java 21 / Spring Boot 3 / PostgreSQL on the backend; Next.js,
+TypeScript, Tailwind, and TanStack Query on the frontend.
 
-The Phase 6 design proposal is in [docs/dashboard-design.md](docs/dashboard-design.md).
-Frontend implementation is awaiting the design approval requested in the project brief.
+Start with the [five-minute demo](docs/demo.md), the
+[architecture and trade-offs](#architecture), or the
+[load-test results](docs/load-results.md).
+
+![Accounts dashboard](docs/screenshots/accounts.png)
+
+The dashboard uses the [approved design direction](docs/dashboard-design.md):
+neutral surfaces, a navy accent, compact tables, and exact monospace amounts.
+Transfers follow a details → review → confirmation flow. Account search and
+filters work across the full account directory. Request replay diagnostics and
+receiver simulations are separated into Developer tools.
 Browser access is configured for `http://localhost:3000` and
 `http://127.0.0.1:3000` in the local profile. Set `FRONTEND_ORIGINS` to an explicit
 comma-separated list for other origins; outside the local profile, the default
@@ -20,15 +30,26 @@ Install Docker Desktop and start its Linux engine, then run from the repository 
 ```sh
 docker compose up --build -d
 curl http://localhost:8080/actuator/health
-curl http://localhost:8080/api/accounts
 ```
 
-The first build downloads Java and Maven images. The API listens on port 8080;
+Open the [dashboard](http://127.0.0.1:3000). No local Java or Node installation
+is needed to run the Compose demo. Health checks gate startup in database,
+backend, then frontend order.
+
+| Service | Address |
+| --- | --- |
+| Dashboard | http://127.0.0.1:3000 |
+| API / health | http://127.0.0.1:8080/actuator/health |
+| Interactive API documentation | http://127.0.0.1:8080/docs |
+| OpenAPI JSON | http://127.0.0.1:8080/v3/api-docs |
+| Prometheus metrics | http://127.0.0.1:8080/actuator/prometheus |
+
+The first build downloads Java, Maven, and Node images. The API listens on port 8080;
 PostgreSQL is exposed on port 15432 to avoid clashing with local installations.
 Both ports are bound to localhost. The local profile creates four merchant
 accounts and one clearing account. Northstar Commerce starts with INR 25,000.00,
 backed by a funding journal that debits the clearing account by the same amount.
-Other merchants start at zero. There is no dashboard yet.
+Other merchants start at zero. Existing volumes retain their balances and history.
 
 ```sh
 curl -i http://localhost:8080/api/accounts \
@@ -49,6 +70,39 @@ The credentials in Compose are for local development. Authentication and
 authorization are not implemented; this service is not ready for public exposure.
 
 ## Develop and test
+
+For frontend development, use Node 24 and npm. Stop the Compose frontend first
+if you want the development server to use port 3000:
+
+```sh
+docker compose stop frontend
+cd frontend
+npm ci
+npm run dev
+```
+
+The browser API URL defaults to `http://127.0.0.1:8080`. Copy
+`frontend/.env.example` to `frontend/.env.local` to override it. Public Next.js
+variables are embedded at build time; the Dockerfile accepts
+`NEXT_PUBLIC_API_URL` as a build argument. That URL must be reachable by the
+browser, not just from another container.
+
+```sh
+cd frontend
+npx playwright install chromium
+npm run typecheck
+npm test
+npm run build
+```
+
+Eleven frontend checks cover transfer review and receipts, available-balance
+validation, account filters, exact money limits, concurrent requests using one
+key, unknown-outcome recovery across reload, validation and business rejections,
+modal keyboard focus, and mobile table overflow. Browser tests use deterministic
+API fixtures and a separate server on port 3001. Production code uses the real API.
+Run `npm run test:demo` against the Compose stack for the live walkthrough and
+screenshots; this intentionally posts one INR 1.00 transfer and exercises webhook
+failure/recovery. See [the demo guide](docs/demo.md#repeatable-browser-check).
 
 Use JDK 21 and the included Maven wrapper. For a backend process outside Docker:
 
@@ -76,7 +130,15 @@ The transfer tests cover exact debit/credit posting, insufficient funds, inactiv
 accounts, currency mismatch, amount precision and overflow, database failure
 rollback, immutable history, deferred journal constraints, paginated running
 balances, and reconciliation drift. The concurrency suite exercises competing
-writers and verifies ledger invariants. Load-test results belong to Phase 8.
+writers and verifies ledger invariants. The [k6 results](docs/load-results.md)
+measure HTTP behavior separately.
+
+Final verification: **66 backend tests passed**, with no failures or skips;
+**11 frontend checks passed**; the production frontend image built successfully.
+The live browser run verified two requests produced one INR 1.00 movement,
+webhook failure followed by recovery retained one receipt, and reconciliation
+remained balanced. The [recorded run](docs/screenshots/verification.json) and
+[screenshots](docs/demo.md#screenshots) come from the real local service.
 
 Phase 2 verification: Java 21 `mvnw verify` passed 24 integration tests with no
 failures or skips. The existing Phase 1 database upgraded through Flyway to V2.
@@ -168,7 +230,7 @@ statuses, are rejected. Names need not be unique; UUIDs identify accounts.
 
 Amounts use PostgreSQL `BIGINT` and Java `long`. JSON returns `balanceMinor` as
 a decimal string so JavaScript cannot round large integers. For example,
-`"125050"` means INR 1,250.50 for an INR account. The dashboard will format this
+`"125050"` means INR 1,250.50 for an INR account. The dashboard formats this
 without floating-point arithmetic.
 
 Validation returns 400 using Problem Details and field errors. Missing accounts
@@ -434,17 +496,81 @@ Spring Boot 3.5 is used with Java 21 as requested. See the
 [Spring Boot requirements](https://docs.spring.io/spring-boot/3.5/system-requirements.html)
 and [Flyway PostgreSQL support](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database).
 
-## Next phases
+## Architecture
+
+```mermaid
+flowchart LR
+    Browser[Next.js dashboard] -->|HTTP + Idempotency-Key| API[Spring MVC API]
+    API --> Keys[Idempotent transfer service]
+    Keys --> Transaction[Account locks + transfer + two entries + outbox]
+    Transaction --> DB[(PostgreSQL)]
+    DB -->|Claim with lease| Worker[Webhook worker]
+    Worker -->|Signed HTTP request| Receiver[Receiver + event deduplication]
+    Worker -->|Attempt and retry result| DB
+    API --> Metrics[Actuator / Prometheus]
+    Worker --> Metrics
+```
+
+The money transaction contains the idempotency response, balance changes,
+transfer, two entries, and outbox records. A rollback removes all of them.
+The worker makes HTTP calls after claiming in a separate transaction. Delivery
+is at least once; the receiver's unique endpoint/event pair prevents duplicate
+side effects. Database journal constraints remain the last line of defense.
+
+The frontend keeps money as strings and uses `BigInt` for parsing and display.
+Before sending, it saves the key and exact payload in this tab's session storage.
+Retries and reloads reuse that snapshot. An unresolved request cannot silently
+be replaced with a new key. The green proof is shown only after fetching and
+checking the actual debit and credit.
+
+The main trade-offs are explicit row locking over optimistic retry loops;
+PostgreSQL outbox polling over an additional broker; exact integer minor units
+over floating point; and offset pagination over cursors. They keep the project
+small and make correctness visible. A busy account pair serializes by design,
+which is reflected in the [contention benchmark](docs/load-results.md).
+
+## Metrics and API documentation
+
+Actuator exposes `/actuator/metrics` for inspection and `/actuator/prometheus`
+for scraping. [Micrometer](https://docs.micrometer.io/micrometer/reference/implementations/prometheus.html)
+provides the registry; [springdoc](https://springdoc.org/v2/) generates
+`/v3/api-docs` and the interactive `/docs` page from the running application.
+
+| Meter name | Meaning |
+| --- | --- |
+| `ledger.transfer.requests` | HTTP transfer timer, including validation, database wait, commit, and replay; outcome `completed`, `rejected`, or `error` |
+| `ledger.idempotency.replays` | Responses carrying `Idempotency-Replayed: true`, including cached rejections |
+| `ledger.webhook.attempts` | Committed worker attempt outcomes, tagged `success` or `failure` |
+| `ledger.webhook.retries` | Failed attempts durably scheduled for another attempt |
+| `ledger.webhook.dead.letters` | Failed HTTP attempts that exhaust the retry budget |
+
+Transfer latency also exports histogram buckets. Example PromQL after scraping:
+
+```promql
+histogram_quantile(0.95, sum by (le) (rate(ledger_transfer_requests_seconds_bucket[5m])))
+sum(rate(ledger_idempotency_replays_total[5m]))
+sum by (outcome) (rate(ledger_webhook_attempts_total[5m]))
+```
+
+Tags never contain account IDs, event IDs, keys, or destination URLs. Counters
+are process-local observations and reset on restart; the database is the durable
+history. Stale lease outcomes are not counted twice. A crash between commit and
+metric recording can miss an observation, and lease-expiry recovery without an
+HTTP result is represented in delivery history rather than these HTTP counters.
+Meters appear after their first observation. JVM, connection-pool, and standard
+HTTP metrics are also available.
+
+## Phase status
 
 1. Accounts and project setup (implemented).
 2. Double-entry ledger and transfers (implemented).
 3. Idempotency keys and replay behavior (implemented).
 4. Concurrency safety and invariant tests (implemented).
 5. Transactional outbox, webhook worker, and test receiver (implemented).
-6. Approved design tokens and wireframes, frontend foundation, account screens.
-7. Transfer demo, transfers, and webhook screens.
-8. Metrics, k6, OpenAPI, full Compose setup, and measured results.
+6. Approved design tokens, frontend foundation, and account screens (implemented).
+7. Transfer demo, transfers, and webhook screens (implemented).
+8. Metrics, k6, OpenAPI, full Compose setup, and measured results (implemented).
 
-The dashboard direction is a light, table-focused workspace: neutral surfaces,
-one restrained accent, thin borders, and monospace IDs and amounts. Design tokens
-and screen wireframes will be reviewed before frontend implementation.
+This is ready for a local portfolio demo. Production work would include
+authentication and tenant-scoped keys, separate database roles, managed secret
+encryption, egress controls, retention policies, and longer capacity tests.
