@@ -1,15 +1,12 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { allAccounts, ApiError, get, request } from "@/lib/api";
-import { money, parseAmount } from "@/lib/format";
-import type {
-  Currency,
-  Transfer,
-  TransferDetail,
-  TransferRequest,
-} from "@/lib/types";
+import { allAccounts, ApiError, request } from "@/lib/api";
+import { date, money, parseAmount, shortId } from "@/lib/format";
+import type { Currency, Transfer, TransferRequest } from "@/lib/types";
 import {
+  Badge,
   Button,
   Copy,
   ErrorNotice,
@@ -18,62 +15,30 @@ import {
   Loading,
   PageHeader,
   Select,
-  Table,
 } from "./ui";
-import { LedgerTable } from "./ledger-table";
 
-type Snapshot = { key: string; payload: TransferRequest; currency: Currency };
-type Result = {
-  status: number;
-  replayed: boolean | null;
-  id?: string;
-  error?: string;
+type Draft = {
+  key: string;
+  payload: TransferRequest;
+  currency: Currency;
+  receipt?: Transfer;
 };
 const storageKey = "ledger.transfer.draft";
+
 export function NewTransfer() {
   const client = useQueryClient();
-  const lock = useRef(false);
+  const sending = useRef(false);
   const [ready, setReady] = useState(false);
-  const [key, setKey] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [results, setResults] = useState<Result[]>([]);
-  const [error, setError] = useState<Error | null>(null);
+  const [review, setReview] = useState<Draft | null>(null);
+  const [submitted, setSubmitted] = useState<Draft | null>(null);
+  const [receipt, setReceipt] = useState<Transfer | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem(storageKey);
-      if (stored) {
-        const draft = JSON.parse(stored) as Snapshot;
-        if (
-          !draft.key ||
-          !draft.payload?.fromAccountId ||
-          !draft.payload.toAccountId ||
-          !/^[1-9]\d*$/.test(draft.payload.amountMinor) ||
-          !["INR", "USD", "EUR", "GBP"].includes(draft.currency)
-        )
-          throw new Error(
-            "The saved request could not be read. Preserve this tab's session data before clearing it.",
-          );
-        setSnapshot(draft);
-        setKey(draft.key);
-        setFrom(draft.payload.fromAccountId);
-        setTo(draft.payload.toAccountId);
-        setAmount(
-          `${BigInt(draft.payload.amountMinor) / 100n}.${(BigInt(draft.payload.amountMinor) % 100n).toString().padStart(2, "0")}`,
-        );
-      } else setKey(crypto.randomUUID());
-      setReady(true);
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause
-          : new Error("Saved request unavailable."),
-      );
-    }
-  }, []);
+  const [failure, setFailure] = useState<ApiError | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [fields, setFields] = useState<Record<string, string>>({});
   const accounts = useQuery({
     queryKey: ["accounts", "all"],
     queryFn: ({ signal }) => allAccounts(signal),
@@ -83,343 +48,432 @@ export function NewTransfer() {
       (account) => account.status === "ACTIVE" && account.kind === "MERCHANT",
     ) || [];
   const source = accounts.data?.find((account) => account.id === from);
-  const transferId = results.find((result) => result.id)?.id;
-  const proof = useQuery({
-    queryKey: ["transfer", transferId],
-    queryFn: ({ signal }) =>
-      get<TransferDetail>(`/transfers/${transferId}`, signal),
-    enabled: !!transferId,
-  });
-  const verified = !!(
-    snapshot &&
-    proof.data &&
-    proof.data.entries.length === 2 &&
-    results
-      .filter((result) => result.id)
-      .every((result) => result.id === proof.data.transfer.id) &&
-    proof.data.entries.some(
-      (entry) =>
-        entry.accountId === snapshot.payload.fromAccountId &&
-        entry.amountMinor === `-${snapshot.payload.amountMinor}`,
-    ) &&
-    proof.data.entries.some(
-      (entry) =>
-        entry.accountId === snapshot.payload.toAccountId &&
-        entry.amountMinor === snapshot.payload.amountMinor,
-    )
-  );
-  const canReset =
-    results.some((result) => result.id) ||
-    (results.length > 0 &&
-      results.every((result) => [400, 404, 422].includes(result.status)));
-  async function send(count: number) {
-    if (lock.current || !ready) return;
-    lock.current = true;
-    setBusy(true);
-    setError(null);
+  const recipient = accounts.data?.find((account) => account.id === to);
+  const currency = submitted?.currency || review?.currency || source?.currency;
+  const name = (id: string) =>
+    accounts.data?.find((account) => account.id === id)?.name || shortId(id);
+
+  useEffect(() => {
+    if (review || submitted || receipt)
+      document.querySelector<HTMLElement>(".transfer-page h1")?.focus();
+  }, [review, submitted, receipt]);
+
+  useEffect(() => {
     try {
-      let draft = snapshot;
-      if (!draft) {
-        if (!source || !to || from === to)
+      const stored = sessionStorage.getItem(storageKey);
+      if (stored) {
+        const draft = JSON.parse(stored) as Draft;
+        if (
+          !draft.key ||
+          !draft.payload?.fromAccountId ||
+          !draft.payload.toAccountId ||
+          !/^[1-9]\d*$/.test(draft.payload.amountMinor) ||
+          !["INR", "USD", "EUR", "GBP"].includes(draft.currency)
+        )
           throw new Error(
-            "Choose two different active accounts in the same currency.",
+            "The saved transfer could not be loaded. Keep this tab open and contact your administrator.",
           );
-        draft = {
-          key,
-          currency: source.currency,
-          payload: {
-            fromAccountId: from,
-            toAccountId: to,
-            amountMinor: parseAmount(amount),
-          },
-        };
-        sessionStorage.setItem(storageKey, JSON.stringify(draft));
-        setSnapshot(draft);
+        setSubmitted(draft);
+        setFrom(draft.payload.fromAccountId);
+        setTo(draft.payload.toAccountId);
+        setReceipt(draft.receipt || null);
       }
-      const saved = draft;
-      const batch = await Promise.all(
-        Array.from({ length: count }, async (): Promise<Result> => {
-          try {
-            const response = await request<Transfer>("/transfers", {
-              method: "POST",
-              headers: { "Idempotency-Key": saved.key },
-              body: JSON.stringify(saved.payload),
-            });
-            return {
-              status: response.status,
-              replayed: response.replayed,
-              id: response.data.id,
-            };
-          } catch (cause) {
-            const failure =
-              cause instanceof ApiError
-                ? cause
-                : new ApiError(
-                    0,
-                    "The outcome is unknown. Retry this saved request.",
-                  );
-            return {
-              status: failure.status,
-              replayed: failure.replayed,
-              error: failure.message,
-            };
-          }
-        }),
-      );
-      setResults((previous) => [...previous, ...batch]);
-      await Promise.all(
-        [
-          "accounts",
-          "account",
-          "entries",
-          "transfers",
-          "transfer",
-          "reconciliation",
-        ].map((name) => client.invalidateQueries({ queryKey: [name] })),
-      );
+      setReady(true);
     } catch (cause) {
       setError(
         cause instanceof Error
           ? cause
-          : new Error("Could not save the request. No request was sent."),
+          : new Error("Saved transfer unavailable."),
+      );
+    }
+  }, []);
+
+  function reviewTransfer() {
+    const errors: Record<string, string> = {};
+    if (!source || !eligible.some((account) => account.id === from))
+      errors.from = "Select an active account.";
+    if (
+      !recipient ||
+      recipient.id === from ||
+      recipient.currency !== source?.currency ||
+      !eligible.some((account) => account.id === to)
+    )
+      errors.to = "Select a recipient in the same currency.";
+    let minor = "";
+    try {
+      minor = parseAmount(amount);
+      if (source && BigInt(minor) > BigInt(source.balanceMinor))
+        errors.amount = "Amount exceeds the available balance.";
+    } catch (cause) {
+      errors.amount = (cause as Error).message;
+    }
+    setFields(errors);
+    if (Object.keys(errors).length) {
+      document.getElementById(Object.keys(errors)[0])?.focus();
+      return;
+    }
+    setReview({
+      key: crypto.randomUUID(),
+      currency: source!.currency,
+      payload: { fromAccountId: from, toAccountId: to, amountMinor: minor },
+    });
+    setError(null);
+  }
+
+  async function confirmTransfer() {
+    const draft = submitted || review;
+    if (!draft || sending.current) return;
+    sending.current = true;
+    setBusy(true);
+    setFailure(null);
+    setError(null);
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(draft));
+      setSubmitted(draft);
+      let transfer: Transfer;
+      try {
+        transfer = (
+          await request<Transfer>("/transfers", {
+            method: "POST",
+            headers: { "Idempotency-Key": draft.key },
+            body: JSON.stringify(draft.payload),
+          })
+        ).data;
+      } catch (cause) {
+        setFailure(
+          cause instanceof ApiError
+            ? cause
+            : new ApiError(0, "Unable to confirm the transfer status."),
+        );
+        return;
+      }
+      setReceipt(transfer);
+      try {
+        sessionStorage.setItem(
+          storageKey,
+          JSON.stringify({ ...draft, receipt: transfer }),
+        );
+      } catch {
+        setError(
+          new Error(
+            "Transfer completed, but this browser could not save its receipt. You can find it in Transfers.",
+          ),
+        );
+      }
+      await Promise.all(
+        ["accounts", "account", "entries", "transfers", "reconciliation"].map(
+          (key) => client.invalidateQueries({ queryKey: [key] }),
+        ),
+      );
+    } catch {
+      setError(
+        new Error(
+          "This browser could not save the transfer. No new request was sent. Enable session storage and try again.",
+        ),
       );
     } finally {
-      lock.current = false;
+      sending.current = false;
       setBusy(false);
     }
   }
-  function reset() {
+  function startNew() {
     try {
       sessionStorage.removeItem(storageKey);
-      setSnapshot(null);
-      setResults([]);
-      setAmount("");
-      setKey(crypto.randomUUID());
+      setSubmitted(null);
+      setReview(null);
+      setReceipt(null);
+      setFailure(null);
       setError(null);
+      setFields({});
+      setAmount("");
     } catch {
-      setError(new Error("Could not clear the saved request."));
+      setError(new Error("Unable to clear the saved transfer."));
     }
   }
+  const rejected = failure && [400, 404, 422].includes(failure.status);
+  const draft = submitted || review;
   return (
-    <>
+    <div className="transfer-page">
+      <Link href="/transfers" className="back-link">
+        ← Transfers
+      </Link>
       <PageHeader
-        title="New transfer"
-        eyebrow="Move money"
-        description="Send once. Retry with the same key. Inspect the ledger."
+        title={
+          receipt
+            ? "Transfer completed"
+            : submitted
+              ? rejected
+                ? "Transfer declined"
+                : "Transfer status"
+              : review
+                ? "Review transfer"
+                : "New transfer"
+        }
+        description={
+          receipt
+            ? "The funds have been transferred to the recipient account."
+            : submitted
+              ? "Review the status of your submitted transfer."
+              : review
+                ? "Check the details before confirming."
+                : "Transfer funds between accounts in the same currency."
+        }
       />
-      <ErrorNotice error={accounts.error} retry={() => accounts.refetch()} />
       <ErrorNotice error={error} />
-      <div className="form-layout">
-        <section className="panel panel-body">
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void send(1);
-            }}
-          >
-            {accounts.isPending && <Loading rows={2} />}
-            <Field
-              id="from"
-              title="From account"
-              hint={
-                source
-                  ? `Available ${money(source.balanceMinor, source.currency)}`
-                  : undefined
-              }
+      {!submitted && (
+        <ol className="transfer-steps" aria-label="Transfer progress">
+          <li aria-current={!review ? "step" : undefined}>
+            <span>1</span>Details
+          </li>
+          <li aria-current={review ? "step" : undefined}>
+            <span>2</span>Review & confirm
+          </li>
+        </ol>
+      )}
+      {receipt ? (
+        <section className="transfer-receipt">
+          <div className="receipt-heading">
+            <Badge value="COMPLETED" />
+            <p className="receipt-amount">
+              {money(receipt.amountMinor, receipt.currency)}
+            </p>
+          </div>
+          <dl className="review-list">
+            <div>
+              <dt>From</dt>
+              <dd>{name(receipt.fromAccountId)}</dd>
+            </div>
+            <div>
+              <dt>To</dt>
+              <dd>{name(receipt.toAccountId)}</dd>
+            </div>
+            <div>
+              <dt>Completed · UTC</dt>
+              <dd>{date(receipt.createdAt)}</dd>
+            </div>
+            <div>
+              <dt>Transfer reference</dt>
+              <dd>
+                <Copy value={receipt.id} />
+              </dd>
+            </div>
+          </dl>
+          <div className="transfer-footer">
+            <Link
+              className="button button-primary"
+              href={`/transfers/${receipt.id}`}
             >
-              <Select
-                id="from"
-                required
-                value={from}
-                disabled={!!snapshot || busy}
-                onChange={(event) => {
-                  setFrom(event.target.value);
-                  setTo("");
-                }}
-              >
-                <option value="">Choose an account</option>
-                {eligible.map((account) => (
-                  <option value={account.id} key={account.id}>
-                    {account.name} · {account.currency}
-                  </option>
-                ))}
-                {snapshot &&
-                  !eligible.some((account) => account.id === from) && (
-                    <option value={from}>{from}</option>
-                  )}
-              </Select>
-            </Field>
-            <Field id="to" title="To account">
-              <Select
-                id="to"
-                required
-                value={to}
-                disabled={!!snapshot || busy || !source}
-                onChange={(event) => setTo(event.target.value)}
-              >
-                <option value="">Choose a recipient</option>
-                {eligible
-                  .filter(
-                    (account) =>
-                      account.currency === source?.currency &&
-                      account.id !== from,
-                  )
-                  .map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name}
-                    </option>
-                  ))}
-                {snapshot && !eligible.some((account) => account.id === to) && (
-                  <option value={to}>{to}</option>
-                )}
-              </Select>
-            </Field>
-            <Field
-              id="amount"
-              title={`Amount${snapshot?.currency || source?.currency ? ` · ${snapshot?.currency || source?.currency}` : ""}`}
-              hint="Use up to two decimal places."
+              View transfer
+            </Link>
+            <Button onClick={startNew}>New transfer</Button>
+          </div>
+        </section>
+      ) : draft ? (
+        <section className="transfer-receipt">
+          <div className="receipt-heading">
+            <p className="muted">Transfer amount</p>
+            <p className="receipt-amount">
+              {money(draft.payload.amountMinor, draft.currency)}
+            </p>
+          </div>
+          <dl className="review-list">
+            <div>
+              <dt>From account</dt>
+              <dd>
+                {name(draft.payload.fromAccountId)}
+                <code>{draft.payload.fromAccountId}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>To account</dt>
+              <dd>
+                {name(draft.payload.toAccountId)}
+                <code>{draft.payload.toAccountId}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Currency</dt>
+              <dd>{draft.currency}</dd>
+            </div>
+          </dl>
+          {submitted && !busy && (
+            <div
+              className={`transfer-message ${rejected ? "transfer-message-error" : ""}`}
+              role="status"
             >
-              <Input
-                id="amount"
-                required
-                inputMode="decimal"
-                placeholder="0.00"
-                value={amount}
-                disabled={!!snapshot || busy}
-                onChange={(event) => setAmount(event.target.value)}
-              />
-            </Field>
-            <div className="key-box">
-              <p className="eyebrow">Idempotency key</p>
-              {key ? (
-                <Copy value={key} />
-              ) : (
-                <span className="muted">Preparing request…</span>
+              <strong>
+                {rejected
+                  ? "Transfer was not completed"
+                  : "Confirmation required"}
+              </strong>
+              <p>
+                {failure?.message ||
+                  "This transfer was previously submitted. Check its status before starting another transfer."}
+              </p>
+              {!rejected && (
+                <p>
+                  Checking will safely retry this transfer without sending the
+                  funds twice.
+                </p>
               )}
-              <p className="muted">
-                {snapshot
-                  ? "This key and payload are locked for safe retries."
-                  : "Generated for this transfer. Both parallel requests use this key."}
-              </p>
             </div>
-            <div className="actions">
-              <Button variant="primary" disabled={!ready || busy}>
-                {busy
-                  ? "Sending…"
-                  : snapshot
-                    ? "Send same request again"
-                    : "Send transfer"}
-              </Button>
-              <Button
-                type="button"
-                disabled={
-                  !ready || busy || (!snapshot && (!from || !to || !amount))
-                }
-                onClick={() => send(2)}
-              >
-                Send twice in parallel
-              </Button>
-            </div>
-            {snapshot && (
-              <p className="muted mt-4">
-                The request is saved in this tab. If the connection fails, retry
-                it here to resolve the outcome.
-              </p>
-            )}
-            {canReset && (
-              <Button
-                type="button"
-                variant="quiet"
-                disabled={busy}
-                onClick={reset}
-              >
+          )}
+          <div className="transfer-footer">
+            {rejected ? (
+              <Button variant="primary" onClick={startNew}>
                 Start a new transfer
               </Button>
+            ) : (
+              <Button
+                variant="primary"
+                disabled={busy || !ready}
+                onClick={confirmTransfer}
+              >
+                {busy
+                  ? "Processing transfer…"
+                  : submitted
+                    ? "Check transfer status"
+                    : `Confirm ${money(draft.payload.amountMinor, draft.currency)}`}
+              </Button>
             )}
-          </form>
-        </section>
-        <aside className="form-aside">
-          <p className="eyebrow">Try the guarantee</p>
-          <h2>Two requests. One movement.</h2>
-          <p>
-            “Send twice in parallel” sends two requests together. The backend
-            stores the first result and replays it for the second.
-          </p>
-          <p>
-            Each response below shows its HTTP status, replay header, and
-            transfer ID. The journal then confirms the debit and credit.
-          </p>
-          <p>
-            Amounts stay exact from the input to the ledger. No rounding through
-            floating-point numbers.
-          </p>
-        </aside>
-      </div>
-      {results.length > 0 && (
-        <section className="panel result-section">
-          <div className="panel-heading">
-            <h2>Request results</h2>
-            <span className="muted">{results.length} responses</span>
+            {!submitted && (
+              <Button disabled={busy} onClick={() => setReview(null)}>
+                Edit details
+              </Button>
+            )}
           </div>
-          <Table caption="Request results">
-            <thead>
-              <tr>
-                <th>Request</th>
-                <th>HTTP status</th>
-                <th>Replayed</th>
-                <th>Transfer / outcome</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((result, index) => (
-                <tr key={index}>
-                  <td>#{index + 1}</td>
-                  <td>{result.status || "Unknown"}</td>
-                  <td>
-                    {result.replayed === null
-                      ? "Not reported"
-                      : result.replayed
-                        ? "Yes"
-                        : "No"}
-                  </td>
-                  <td>
-                    {result.id ? (
-                      <Copy value={result.id} compact />
-                    ) : (
-                      result.error
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
         </section>
-      )}
-      {transferId && (
-        <section className="panel">
-          <div className="panel-heading">
-            <h2>Ledger verification</h2>
-          </div>
-          <ErrorNotice error={proof.error} retry={() => proof.refetch()} />
-          {proof.isPending ? (
-            <Loading rows={2} />
-          ) : (
-            proof.data && (
-              <>
-                <div
-                  className={`notice ${verified ? "notice-success" : "notice-error"}`}
-                  role="status"
-                >
-                  {verified
-                    ? "Verified: one transfer, two balanced ledger entries."
-                    : "The returned journal does not match this request. Inspect the entries before continuing."}
+      ) : (
+        <div className="transfer-layout">
+          <section className="transfer-form">
+            <div className="section-title">
+              <h2>Transfer details</h2>
+            </div>
+            <ErrorNotice
+              error={accounts.error}
+              retry={() => accounts.refetch()}
+            />
+            {accounts.isPending ? (
+              <Loading rows={3} />
+            ) : (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  reviewTransfer();
+                }}
+              >
+                <div className="transfer-fields">
+                  <Field id="from" title="From account" error={fields.from}>
+                    <Select
+                      id="from"
+                      value={from}
+                      aria-invalid={!!fields.from}
+                      aria-describedby={fields.from ? "from-error" : undefined}
+                      onChange={(event) => {
+                        setFrom(event.target.value);
+                        setTo("");
+                        setFields({});
+                      }}
+                    >
+                      <option value="">Select account</option>
+                      {eligible.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name} · {account.currency} ·{" "}
+                          {shortId(account.id)}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  {source && (
+                    <div className="available-balance">
+                      <span>Available balance</span>
+                      <strong>
+                        {money(source.balanceMinor, source.currency)}
+                      </strong>
+                    </div>
+                  )}
+                  <Field id="to" title="To account" error={fields.to}>
+                    <Select
+                      id="to"
+                      disabled={!source}
+                      value={to}
+                      aria-invalid={!!fields.to}
+                      aria-describedby={fields.to ? "to-error" : undefined}
+                      onChange={(event) => setTo(event.target.value)}
+                    >
+                      <option value="">Select recipient</option>
+                      {eligible
+                        .filter(
+                          (account) =>
+                            account.id !== from &&
+                            account.currency === source?.currency,
+                        )
+                        .map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} · {shortId(account.id)}
+                          </option>
+                        ))}
+                    </Select>
+                  </Field>
+                  <Field id="amount" title="Amount" error={fields.amount}>
+                    <div className="amount-input">
+                      <span>{currency || "—"}</span>
+                      <Input
+                        id="amount"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        placeholder="0.00"
+                        value={amount}
+                        aria-invalid={!!fields.amount}
+                        aria-describedby={
+                          fields.amount ? "amount-error" : undefined
+                        }
+                        onChange={(event) => setAmount(event.target.value)}
+                      />
+                    </div>
+                  </Field>
                 </div>
-                <LedgerTable entries={proof.data.entries} />
-              </>
-            )
-          )}
-        </section>
+                <div className="transfer-footer">
+                  <Button variant="primary" disabled={!ready || !accounts.data}>
+                    Review transfer
+                  </Button>
+                  <Link className="button button-quiet" href="/transfers">
+                    Cancel
+                  </Link>
+                </div>
+              </form>
+            )}
+          </section>
+          <aside className="transfer-summary">
+            <h2>Account information</h2>
+            <dl>
+              <dt>Sending account</dt>
+              <dd>{source?.name || "No account selected"}</dd>
+              {source && (
+                <>
+                  <dt>Account reference</dt>
+                  <dd>
+                    <code>{source.id}</code>
+                  </dd>
+                  <dt>Available balance</dt>
+                  <dd className="mono">
+                    {money(source.balanceMinor, source.currency)}
+                  </dd>
+                  <dt>Status</dt>
+                  <dd>
+                    <Badge value={source.status} />
+                  </dd>
+                </>
+              )}
+            </dl>
+            {source && (
+              <Link className="table-link" href={`/accounts/${source.id}`}>
+                View account →
+              </Link>
+            )}
+          </aside>
+        </div>
       )}
-    </>
+    </div>
   );
 }

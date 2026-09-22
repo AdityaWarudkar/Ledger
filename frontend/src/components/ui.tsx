@@ -83,7 +83,7 @@ export function PageHeader({
     <header className="page-heading">
       <div>
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        <h1>{title}</h1>
+        <h1 tabIndex={-1}>{title}</h1>
         <p className="muted">{description}</p>
       </div>
       <div className="actions">{actions}</div>

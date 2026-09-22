@@ -24,7 +24,12 @@ const links = [
     title: "Webhooks",
     path: "M8 4v9a5 5 0 0 0 10 0M4 4h8M14 13h8M3 20h7",
   },
-  { href: "/system", title: "System", path: "M3 12h4l3-7 4 14 3-7h4" },
+  { href: "/system", title: "Reconciliation", path: "M3 12h4l3-7 4 14 3-7h4" },
+  {
+    href: "/developers",
+    title: "Developer tools",
+    path: "m8 7-5 5 5 5m8-10 5 5-5 5m-3-14-2 18",
+  },
 ];
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -63,7 +68,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             />
           </svg>
           <span>
-            Ledger<span className="brand-sub">Operations console</span>
+            Ledger<span className="brand-sub">Account operations</span>
           </span>
         </Link>
         <button
@@ -75,7 +80,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           Menu
         </button>
         <div className="nav-area" id="main-nav">
-          <p className="nav-label">WORKSPACE</p>
+          <p className="nav-label">Payments</p>
           <nav aria-label="Main navigation">
             {links.map((link) => (
               <Link
@@ -106,30 +111,24 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
         <div className="sidebar-footer">
-          <span className="workspace-mark">L</span>
           <div>
             <strong>
-              {process.env.NEXT_PUBLIC_WORKSPACE_LABEL || "Local workspace"}
+              {process.env.NEXT_PUBLIC_WORKSPACE_LABEL || "Ledger"}
             </strong>
-            <p>Payments ledger</p>
+            <p>Operations workspace</p>
           </div>
         </div>
       </aside>
       <div className="workspace">
         <div className="topbar">
           <span>
-            Workspace <span className="slash">/</span>{" "}
+            Ledger <span className="slash">/</span>{" "}
             <strong>{active?.title || "Ledger"}</strong>
           </span>
-          <span className="topbar-note">All timestamps in UTC</span>
         </div>
         <main id="main" tabIndex={-1}>
           {children}
         </main>
-        <footer className="workspace-footer">
-          <span>Ledger · Operations</span>
-          <span>Amounts shown in account currency</span>
-        </footer>
       </div>
     </div>
   );

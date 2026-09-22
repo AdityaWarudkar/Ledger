@@ -41,8 +41,7 @@ export function Transfers() {
     <>
       <PageHeader
         title="Transfers"
-        eyebrow="Activity"
-        description="Completed transfers and the entries behind them."
+        description="View and manage account transfers."
         actions={
           <Link className="button button-primary" href="/transfers/new">
             New transfer
@@ -164,7 +163,7 @@ export function TransferDetail({ id }: { id: string }) {
       </Link>
       <PageHeader
         title="Transfer details"
-        description="A transfer and its immutable journal."
+        description="Transfer information and ledger entries."
         actions={transfer && <Badge value={transfer.status} />}
       />
       <ErrorNotice error={query.error} retry={() => query.refetch()} />

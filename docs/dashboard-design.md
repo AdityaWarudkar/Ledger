@@ -2,6 +2,13 @@
 
 Status: implemented. The instruction to proceed to Phase 7 approved this direction.
 
+Revision: the operational screens now use white surfaces, neutral slate borders,
+and a navy action color (`#284578`). The normal transfer flow has separate detail,
+review, and receipt states. Replay experiments and receiver simulations live in
+Developer tools. Accounts supports search, status, and currency filters. The
+wireframes below record the original proposal; the current implementation
+prioritizes everyday account operations over explaining the implementation.
+
 The dashboard is a working ledger console. Most of the screen belongs to rows,
 amounts, and useful actions. A fixed sidebar supplies context; the main area
 contains a title, a short explanation where necessary, and the relevant table

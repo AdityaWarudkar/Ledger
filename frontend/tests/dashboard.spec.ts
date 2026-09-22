@@ -118,7 +118,7 @@ async function setup(page: Page, post?: (route: Route) => Promise<void>) {
   });
 }
 async function fillTransfer(page: Page) {
-  await page.goto("/transfers/new");
+  await page.goto("/developers/transfers");
   await page.getByLabel("From account").selectOption(accounts[0].id);
   await page.getByLabel("To account").selectOption(accounts[1].id);
   await page.getByLabel("Amount · INR").fill("125.00");
@@ -294,18 +294,179 @@ test("mobile navigation and tables stay within the viewport", async ({
   ).toBe(true);
 });
 
-test("webhook tables containing copy controls do not widen the mobile page", async ({page}) => {
+test("webhook tables containing copy controls do not widen the mobile page", async ({
+  page,
+}) => {
   await setup(page);
-  await page.route("**/api/webhooks/**", async route => {
+  await page.route("**/api/webhooks/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith("/behavior")) return json(route, {behavior: "HEALTHY"});
-    if (path.endsWith("/endpoints")) return json(route, [{id: "019f0000-0000-7000-8000-000000000008", accountId: accounts[0].id, url: "http://localhost:8080/api/webhooks/test-receiver", createdAt: transfer.createdAt}]);
+    if (path.endsWith("/behavior")) return json(route, { behavior: "HEALTHY" });
+    if (path.endsWith("/endpoints"))
+      return json(route, [
+        {
+          id: "019f0000-0000-7000-8000-000000000008",
+          accountId: accounts[0].id,
+          url: "http://localhost:8080/api/webhooks/test-receiver",
+          createdAt: transfer.createdAt,
+        },
+      ]);
     return json(route, []);
   });
-  await page.setViewportSize({width: 390, height: 844});
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/webhooks");
-  await expect(page.getByRole("table", {name: "Webhook endpoints", exact: true})).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const scroller = page.getByRole("region", {name: "Webhook endpoints", exact: true});
-  expect(await scroller.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+  await expect(
+    page.getByRole("table", { name: "Webhook endpoints", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const scroller = page.getByRole("region", {
+    name: "Webhook endpoints",
+    exact: true,
+  });
+  expect(
+    await scroller.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    ),
+  ).toBe(true);
+});
+
+test("a transfer is reviewed before submission and produces a receipt", async ({
+  page,
+}) => {
+  const sent: unknown[] = [];
+  await setup(page, async (route) => {
+    sent.push(route.request().postDataJSON());
+    await json(route, transfer, 201, false);
+  });
+  await page.goto("/transfers/new");
+  await expect(page.getByText("Idempotency key", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("button", { name: "Send twice in parallel" }),
+  ).toHaveCount(0);
+  await page.getByLabel("From account").selectOption(accounts[0].id);
+  await page.getByLabel("To account").selectOption(accounts[1].id);
+  await page.getByLabel("Amount", { exact: true }).fill("125.00");
+  await page
+    .getByRole("button", { name: "Review transfer", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Review transfer" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Review transfer" }),
+  ).toBeFocused();
+  expect(sent).toHaveLength(0);
+  await page.getByRole("button", { name: "Edit details" }).click();
+  await expect(page.getByLabel("Amount", { exact: true })).toHaveValue(
+    "125.00",
+  );
+  await page
+    .getByRole("button", { name: "Review transfer", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Confirm INR 125.00", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Transfer completed" }),
+  ).toBeVisible();
+  expect(sent).toEqual([
+    {
+      fromAccountId: accounts[0].id,
+      toAccountId: accounts[1].id,
+      amountMinor: "12500",
+    },
+  ]);
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Transfer completed" }),
+  ).toBeVisible();
+  expect(sent).toHaveLength(1);
+});
+
+test("amount above available funds is blocked inline before review", async ({
+  page,
+}) => {
+  let sent = 0;
+  await setup(page, async (route) => {
+    sent++;
+    await json(route, transfer, 201);
+  });
+  await page.goto("/transfers/new");
+  await page.getByLabel("From account").selectOption(accounts[0].id);
+  await page.getByLabel("To account").selectOption(accounts[1].id);
+  await page.getByLabel("Amount", { exact: true }).fill("25000.01");
+  await page
+    .getByRole("button", { name: "Review transfer", exact: true })
+    .click();
+  await expect(
+    page.getByText("Amount exceeds the available balance."),
+  ).toBeVisible();
+  await expect(page.getByLabel("Amount", { exact: true })).toBeFocused();
+  await expect(page.getByLabel("Amount", { exact: true })).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  expect(sent).toBe(0);
+});
+
+test("status recovery retries the original transfer after reload", async ({
+  page,
+}) => {
+  const sent: { key: string; body: unknown }[] = [];
+  await setup(page, async (route) => {
+    sent.push({
+      key: route.request().headers()["idempotency-key"],
+      body: route.request().postDataJSON(),
+    });
+    if (sent.length === 1) return route.abort("failed");
+    return json(route, transfer, 201, true);
+  });
+  await page.goto("/transfers/new");
+  await page.getByLabel("From account").selectOption(accounts[0].id);
+  await page.getByLabel("To account").selectOption(accounts[1].id);
+  await page.getByLabel("Amount", { exact: true }).fill("125.00");
+  await page
+    .getByRole("button", { name: "Review transfer", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Confirm INR 125.00", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Check transfer status" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start a new transfer" }),
+  ).toHaveCount(0);
+  await page.reload();
+  await page.getByRole("button", { name: "Check transfer status" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Transfer completed" }),
+  ).toBeVisible();
+  expect(sent).toHaveLength(2);
+  expect(sent[1]).toEqual(sent[0]);
+});
+
+test("account filters combine search, currency and status", async ({
+  page,
+}) => {
+  await setup(page);
+  await page.goto("/accounts");
+  await page
+    .getByRole("textbox", { name: "Search accounts" })
+    .fill("Fieldwork");
+  await expect(
+    page.getByRole("link", { name: "Fieldwork Studio" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Northstar Commerce" }),
+  ).toHaveCount(0);
+  await page.getByLabel("Account currency").selectOption("INR");
+  await expect(
+    page.getByRole("heading", { name: "No accounts found" }),
+  ).toBeVisible();
 });

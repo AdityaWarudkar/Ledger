@@ -22,9 +22,8 @@ export default function Page() {
   return (
     <>
       <PageHeader
-        title="System"
-        eyebrow="Ledger integrity"
-        description="Compare account balances with the immutable journal."
+        title="Reconciliation"
+        description="Check account balances against ledger entries."
         actions={
           <Button disabled={query.isFetching} onClick={() => query.refetch()}>
             {query.isFetching ? "Checking…" : "Run reconciliation"}

@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
 @theme {
-  --color-canvas: #f7f8f7;
-  --color-ink: #202724;
-  --color-muted: #59635e;
-  --color-line: #dee3df;
-  --color-accent: #176b55;
+  --color-canvas: #ffffff;
+  --color-ink: #1b2433;
+  --color-muted: #667085;
+  --color-line: #e4e7ec;
+  --color-accent: #284578;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
@@ -56,9 +56,9 @@
     margin: 0;
   }
   h1 {
-    font-size: 26px;
+    font-size: 24px;
     font-weight: 600;
-    letter-spacing: -0.7px;
+    letter-spacing: -0.4px;
     line-height: 1.3;
   }
   h2 {
@@ -92,11 +92,11 @@
     min-height: 100vh;
   }
   .sidebar {
-    width: 224px;
+    width: 216px;
     position: fixed;
     inset: 0 auto 0 0;
     border-right: 1px solid var(--color-line);
-    background: #f1f3f1;
+    background: #f8f9fb;
     display: flex;
     flex-direction: column;
     padding: 28px 16px 16px;
@@ -132,14 +132,14 @@
     padding: 8px 12px;
     margin-bottom: 4px;
     border-radius: 4px;
-    color: #4d5752;
+    color: #475467;
   }
   .nav-link:hover {
-    background: #e8ece9;
+    background: #edf0f4;
   }
   .nav-link.active {
-    color: #155840;
-    background: #e0ebe4;
+    color: #233f70;
+    background: #e8edf5;
     font-weight: 600;
   }
   .sidebar-footer {
@@ -169,7 +169,7 @@
     background: #fff;
   }
   .workspace {
-    margin-left: 224px;
+    margin-left: 216px;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -198,7 +198,7 @@
   }
   main {
     flex: 1;
-    padding: 36px 40px 64px;
+    padding: 32px 40px 64px;
     max-width: 1600px;
     width: 100%;
     margin: 0 auto;
@@ -259,8 +259,8 @@
     border-color: var(--color-accent);
   }
   .button-primary:hover:not(:disabled) {
-    background: #115641;
-    border-color: #115641;
+    background: #1e355b;
+    border-color: #1e355b;
   }
   .button-quiet {
     border-color: transparent;
@@ -271,7 +271,7 @@
     min-width: 0;
     background: #fff;
     border: 1px solid var(--color-line);
-    border-radius: 8px;
+    border-radius: 4px;
     overflow: hidden;
   }
   .panel + .panel,
@@ -312,9 +312,9 @@
     border-bottom: 1px solid var(--color-line);
   }
   td {
-    padding: 16px 24px;
+    padding: 13px 20px;
     border-bottom: 1px solid #edf0ed;
-    font-size: 12px;
+    font-size: 13px;
     vertical-align: middle;
   }
   tbody tr:last-child td {
@@ -509,7 +509,7 @@
     max-height: calc(100dvh - 48px);
     overflow-y: auto;
     border: 1px solid var(--color-line);
-    border-radius: 8px;
+    border-radius: 4px;
     margin: auto;
     padding: 0;
     color: var(--color-ink);
@@ -726,6 +726,257 @@
     top: 16px;
   }
 }
+@layer components {
+  .nav-label {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .nav-link {
+    font-size: 13px;
+    min-height: 38px;
+  }
+  .nav-link:last-child {
+    margin-top: 24px;
+    border-top: 1px solid var(--color-line);
+    border-radius: 0;
+    padding-top: 16px;
+  }
+  .page-heading h1 {
+    font-weight: 600;
+  }
+  .page-heading p.muted {
+    font-size: 14px;
+  }
+  .button {
+    font-size: 13px;
+    font-weight: 500;
+    min-height: 38px;
+  }
+  .panel-heading {
+    padding: 16px 20px;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+  .account-toolbar .input:first-child {
+    min-width: 240px;
+    flex: 1;
+    max-width: 400px;
+  }
+  .account-toolbar .count {
+    margin-left: auto;
+  }
+  .back-link {
+    display: inline-block;
+    color: var(--color-muted);
+    font-size: 13px;
+    margin-bottom: 20px;
+  }
+  .back-link:hover {
+    color: var(--color-accent);
+  }
+  .transfer-page {
+    max-width: 1040px;
+  }
+  .transfer-steps {
+    display: flex;
+    list-style: none;
+    padding: 0 0 24px;
+    margin: 0 0 24px;
+    gap: 32px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .transfer-steps li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-muted);
+    font-size: 13px;
+  }
+  .transfer-steps span {
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+  }
+  .transfer-steps li[aria-current="step"] {
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+  .transfer-steps li[aria-current="step"] span {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: white;
+  }
+  .transfer-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 640px) minmax(220px, 1fr);
+    gap: 32px;
+    align-items: start;
+  }
+  .transfer-form,
+  .transfer-receipt {
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: #fff;
+    min-width: 0;
+  }
+  .section-title {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .section-title h2,
+  .transfer-summary h2 {
+    font-size: 14px;
+  }
+  .transfer-fields {
+    padding: 24px;
+  }
+  .transfer-fields .field:last-child {
+    margin-bottom: 0;
+  }
+  .transfer-fields .field > label {
+    font-size: 13px;
+  }
+  .transfer-fields .input {
+    min-height: 44px;
+    border-color: #cfd5de;
+  }
+  .transfer-footer {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 20px 24px;
+    border-top: 1px solid var(--color-line);
+    background: #fafbfc;
+  }
+  .transfer-footer .button {
+    min-height: 40px;
+    padding-inline: 20px;
+  }
+  .available-balance {
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--color-muted);
+    margin: -12px 0 24px;
+  }
+  .available-balance strong {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    color: var(--color-ink);
+  }
+  .amount-input {
+    display: flex;
+    align-items: center;
+    border: 1px solid #cfd5de;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .amount-input > span {
+    padding: 10px 14px;
+    border-right: 1px solid var(--color-line);
+    font-size: 13px;
+    color: var(--color-muted);
+    background: #fafbfc;
+  }
+  .amount-input .input {
+    border: 0;
+    border-radius: 0;
+    font-family: var(--font-mono);
+    font-size: 18px;
+    box-shadow: none;
+  }
+  .amount-input:focus-within {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  .amount-input .input:focus-visible {
+    outline: none;
+  }
+  .transfer-summary {
+    padding: 20px 0 20px 24px;
+    border-left: 1px solid var(--color-line);
+  }
+  .transfer-summary dl {
+    margin: 24px 0;
+  }
+  .transfer-summary dt {
+    color: var(--color-muted);
+    font-size: 12px;
+    margin-top: 20px;
+  }
+  .transfer-summary dd {
+    font-size: 13px;
+    margin: 6px 0 0;
+    overflow-wrap: anywhere;
+  }
+  .transfer-summary .table-link {
+    font-size: 12px;
+  }
+  .transfer-receipt {
+    max-width: 680px;
+  }
+  .receipt-heading {
+    padding: 28px 24px 20px;
+  }
+  .receipt-amount {
+    font-family: var(--font-mono);
+    font-size: 30px;
+    letter-spacing: -1px;
+    margin-top: 8px;
+  }
+  .review-list {
+    padding: 0 24px 16px;
+    margin: 0;
+  }
+  .review-list > div {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 20px;
+    padding: 16px 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .review-list dt {
+    color: var(--color-muted);
+    font-size: 13px;
+  }
+  .review-list dd {
+    margin: 0;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+  .review-list dd > code {
+    display: block;
+    margin-top: 4px;
+    color: var(--color-muted);
+    font-size: 11px;
+  }
+  .transfer-message {
+    margin: 0 24px 24px;
+    background: #f6f8fb;
+    padding: 16px;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .transfer-message p {
+    margin-top: 8px;
+    color: var(--color-muted);
+  }
+  .transfer-message-error {
+    border-color: #ebcece;
+    background: #fff8f7;
+  }
+}
 @media (max-width: 1100px) {
   main {
     padding: 28px 24px 48px;
@@ -742,6 +993,33 @@
   }
 }
 @media (max-width: 800px) {
+  .transfer-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .transfer-summary {
+    border-left: 0;
+    border-top: 1px solid var(--color-line);
+    padding: 20px 0;
+  }
+  .transfer-fields,
+  .transfer-footer,
+  .section-title {
+    padding: 20px 16px;
+  }
+  .transfer-steps {
+    gap: 20px;
+  }
+  .review-list > div {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .account-toolbar .input:first-child {
+    width: 100%;
+    max-width: none;
+    flex-basis: 100%;
+    min-width: 0;
+  }
   .sidebar {
     position: sticky;
     top: 0;

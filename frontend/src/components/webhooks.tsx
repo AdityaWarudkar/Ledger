@@ -68,15 +68,13 @@ export function Webhooks() {
     <>
       <PageHeader
         title="Webhooks"
-        eyebrow="Delivery operations"
-        description="Follow events from the outbox to your receiver."
+        description="Manage endpoints and monitor event deliveries."
         actions={
           <Button variant="primary" onClick={() => setRegistering(true)}>
             Register endpoint
           </Button>
         }
       />
-      <Receiver />
       <ErrorNotice error={accounts.error} retry={() => accounts.refetch()} />
       <section className="panel">
         <div className="panel-heading">
@@ -366,7 +364,7 @@ function RegisterEndpoint({
             <Field
               id="endpoint-url"
               title="Receiver URL"
-              hint="The destination must be allowed by the backend configuration."
+              hint="The URL that will receive events for this account."
             >
               <Input
                 id="endpoint-url"
@@ -379,12 +377,6 @@ function RegisterEndpoint({
                 placeholder="https://example.com/webhooks"
               />
             </Field>
-            <p className="muted text-xs">
-              Local demo URL:{" "}
-              <code className="break-all">
-                http://localhost:8080/api/webhooks/test-receiver
-              </code>
-            </p>
           </div>
           <div className="modal-footer">
             <Button
@@ -429,9 +421,7 @@ function DeliveryInspection({ id }: { id: string }) {
   let payload = data?.payload || "";
   try {
     payload = JSON.stringify(JSON.parse(payload), null, 2);
-  } catch {
-    /* Show the original body when it is not JSON. */
-  }
+  } catch {}
   return (
     <div className="delivery-detail">
       <ErrorNotice error={query.error} retry={() => query.refetch()} />
@@ -501,7 +491,7 @@ function DeliveryInspection({ id }: { id: string }) {
   );
 }
 
-function Receiver() {
+export function Receiver() {
   const client = useQueryClient();
   const [showReceipts, setShowReceipts] = useState(false);
   const [page, setPage] = useState(0);
@@ -543,7 +533,7 @@ function Receiver() {
           <div className="receiver">
             <div>
               <p className="eyebrow">Local test receiver</p>
-              <h2>Make failure visible.</h2>
+              <h2>Receiver behavior</h2>
               <p className="muted">
                 Healthy accepts events. Fail returns 500. Slow exceeds the
                 sender’s timeout.

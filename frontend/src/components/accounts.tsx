@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, get, request } from "@/lib/api";
+import { allAccounts, ApiError, get, request } from "@/lib/api";
 import type { Account, Currency, Entry, Page } from "@/lib/types";
 import { date, money, shortId } from "@/lib/format";
 import {
@@ -26,17 +26,27 @@ import { LedgerTable } from "./ledger-table";
 export function Accounts() {
   const [page, setPage] = useState(0);
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
+  const [currency, setCurrency] = useState("");
   const query = useQuery({
-    queryKey: ["accounts", page],
-    queryFn: ({ signal }) =>
-      get<Page<Account>>(`/accounts?page=${page}&size=25`, signal),
+    queryKey: ["accounts", "all"],
+    queryFn: ({ signal }) => allAccounts(signal),
   });
+  const filtered =
+    query.data?.filter(
+      (account) =>
+        (!status || account.status === status) &&
+        (!currency || account.currency === currency) &&
+        `${account.name} ${account.id}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()),
+    ) || [];
   return (
     <>
       <PageHeader
         title="Accounts"
-        description="Balances and ledger history, account by account."
-        eyebrow="Directory"
+        description="Manage accounts and view balances."
         actions={
           <>
             <Button onClick={() => query.refetch()} disabled={query.isFetching}>
@@ -54,17 +64,51 @@ export function Accounts() {
         stale={!!query.data}
       />
       <section className="panel">
-        <div className="panel-heading">
-          <h2>All accounts</h2>
+        <div className="toolbar account-toolbar">
+          <Input
+            aria-label="Search accounts"
+            placeholder="Search by name or account ID"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(0);
+            }}
+          />
+          <Select
+            aria-label="Account status"
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">All statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="FROZEN">Frozen</option>
+            <option value="CLOSED">Closed</option>
+          </Select>
+          <Select
+            aria-label="Account currency"
+            value={currency}
+            onChange={(event) => {
+              setCurrency(event.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="">All currencies</option>
+            {["INR", "USD", "EUR", "GBP"].map((value) => (
+              <option key={value}>{value}</option>
+            ))}
+          </Select>
           <span className="count">
-            {query.data ? `${query.data.totalElements} accounts` : "Loading"}
+            {query.data ? `${filtered.length} accounts` : "Loading"}
           </span>
         </div>
         {query.isPending ? (
           <Loading />
         ) : (
           query.data &&
-          (query.data.items.length ? (
+          (filtered.length ? (
             <Table caption="Accounts">
               <thead>
                 <tr>
@@ -77,7 +121,7 @@ export function Accounts() {
                 </tr>
               </thead>
               <tbody>
-                {query.data.items.map((account) => (
+                {filtered.slice(page * 25, (page + 1) * 25).map((account) => (
                   <tr key={account.id}>
                     <td>
                       <Link
@@ -104,16 +148,18 @@ export function Accounts() {
               </tbody>
             </Table>
           ) : (
-            <Empty title="Your first account starts here">
-              Create an account to begin tracking its ledger.
+            <Empty title="No accounts found">
+              {query.data.length
+                ? "Try another search or clear the filters."
+                : "Create an account to get started."}
             </Empty>
           ))
         )}
         {query.data && (
           <Pagination
             page={page}
-            total={query.data.totalElements}
-            next={page + 1 < query.data.totalPages}
+            total={filtered.length}
+            next={(page + 1) * 25 < filtered.length}
             onChange={setPage}
           />
         )}
@@ -158,6 +204,8 @@ function CreateAccount({ onClose }: { onClose: () => void }) {
           <Field id="account-name" title="Account name" error={fields.name}>
             <Input
               id="account-name"
+              aria-invalid={!!fields.name}
+              aria-describedby={fields.name ? "account-name-error" : undefined}
               autoFocus
               required
               maxLength={120}
@@ -218,7 +266,7 @@ export function AccountDetail({ id }: { id: string }) {
       </Link>
       <PageHeader
         title={account.data?.name || "Account details"}
-        description="Every movement, in posting order."
+        description="Account balance and transaction history."
         actions={account.data && <Badge value={account.data.status} />}
       />
       <ErrorNotice
