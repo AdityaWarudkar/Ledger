@@ -378,8 +378,7 @@ export function NewTransfer() {
                       <option value="">Select account</option>
                       {eligible.map((account) => (
                         <option key={account.id} value={account.id}>
-                          {account.name} · {account.currency} ·{" "}
-                          {shortId(account.id)}
+                          {account.name}
                         </option>
                       ))}
                     </Select>
@@ -410,7 +409,7 @@ export function NewTransfer() {
                         )
                         .map((account) => (
                           <option key={account.id} value={account.id}>
-                            {account.name} · {shortId(account.id)}
+                            {account.name}
                           </option>
                         ))}
                     </Select>
