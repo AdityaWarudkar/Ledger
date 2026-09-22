@@ -49,6 +49,7 @@ class WebhookIntegrationTest {
     @Autowired DeliveryStore deliveries;
     @Autowired WebhookWorker worker;
     @Autowired JdbcTemplate jdbc;
+    @Autowired io.micrometer.core.instrument.MeterRegistry metrics;
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired TestRestTemplate rest;
     @LocalServerPort int port;
@@ -144,6 +145,9 @@ class WebhookIntegrationTest {
 
     @Test
     void receiverFailureThenRecoveryDeliversAndManualReplayIsDeduplicated() {
+        double successes = metrics.counter("ledger.webhook.attempts", "outcome", "success").count();
+        double failures = metrics.counter("ledger.webhook.attempts", "outcome", "failure").count();
+        double retries = metrics.counter("ledger.webhook.retries").count();
         send();
         UUID id = delivery().id();
         behavior("FAIL");
@@ -163,6 +167,9 @@ class WebhookIntegrationTest {
         assertThat(receipts()).isEqualTo(1);
         assertThat(deliveries.get(id).attempts()).hasSize(3);
         assertThat(deliveries.get(id).delivery().eventId()).isEqualTo(failed.delivery().eventId());
+        assertThat(metrics.counter("ledger.webhook.attempts", "outcome", "success").count()).isEqualTo(successes + 2);
+        assertThat(metrics.counter("ledger.webhook.attempts", "outcome", "failure").count()).isEqualTo(failures + 1);
+        assertThat(metrics.counter("ledger.webhook.retries").count()).isEqualTo(retries + 1);
     }
 
     @Test

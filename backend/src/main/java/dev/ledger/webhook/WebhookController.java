@@ -20,6 +20,7 @@ public class WebhookController {
     }
 
     @PostMapping("/endpoints")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Endpoint registered; signing secret is returned only once")
     public ResponseEntity<WebhookService.RegisteredEndpoint> register(@Valid @RequestBody Registration request) {
         var endpoint = endpoints.register(request.accountId(), request.url());
         return ResponseEntity.created(URI.create("/api/webhooks/endpoints")).body(endpoint);
@@ -45,6 +46,7 @@ public class WebhookController {
     }
 
     @PostMapping("/deliveries/{id}/replay")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "202", description = "Terminal delivery queued again with its original event ID")
     public ResponseEntity<DeliveryStore.Delivery> replay(@PathVariable UUID id) {
         return ResponseEntity.accepted().body(deliveries.replay(id));
     }

@@ -18,6 +18,7 @@ public class AccountController {
     }
 
     @PostMapping
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Active merchant account created with a zero balance")
     public ResponseEntity<AccountResponse> create(@Valid @RequestBody CreateAccountRequest request) {
         var account = accounts.create(request);
         return ResponseEntity.created(URI.create("/api/accounts/" + account.id())).body(account);

@@ -22,7 +22,17 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        ledger.transfer.requests: true
+        http.server.requests: true
+springdoc:
+  paths-to-match: /api/**
+  swagger-ui:
+    path: /docs
+    disable-swagger-default-url: true
 server:
   shutdown: graceful
 ledger:

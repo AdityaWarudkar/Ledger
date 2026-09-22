@@ -1,6 +1,7 @@
 package dev.ledger.webhook;
 
 import jakarta.annotation.PreDestroy;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -15,11 +16,13 @@ public class WebhookWorker {
     private final WebhookProperties properties;
     private final WebhookUrlPolicy urls;
     private final HttpClient client;
+    private final MeterRegistry metrics;
 
-    public WebhookWorker(DeliveryStore deliveries, WebhookProperties properties, WebhookUrlPolicy urls) {
+    public WebhookWorker(DeliveryStore deliveries, WebhookProperties properties, WebhookUrlPolicy urls, MeterRegistry metrics) {
         this.deliveries = deliveries;
         this.properties = properties;
         this.urls = urls;
+        this.metrics = metrics;
         this.client = HttpClient.newBuilder().connectTimeout(properties.requestTimeout())
                 .followRedirects(HttpClient.Redirect.NEVER).build();
     }
@@ -58,7 +61,18 @@ public class WebhookWorker {
             error = exception.getMessage();
         }
         long latency = (System.nanoTime() - started) / 1_000_000;
-        deliveries.finish(claim, status, latency, error, backoffMillis(claim.cycleAttempts()));
+        boolean recorded = deliveries.finish(claim, status, latency, error, backoffMillis(claim.cycleAttempts()));
+        // A stale lease must not report a second delivery. finish returns after its transaction commits.
+        if (recorded) {
+            boolean success = status != null && status >= 200 && status < 300;
+            metrics.counter("ledger.webhook.attempts", "outcome", success ? "success" : "failure").increment();
+            if (!success && claim.cycleAttempts() < properties.maxAttempts()) {
+                metrics.counter("ledger.webhook.retries").increment();
+            }
+            if (!success && claim.cycleAttempts() >= properties.maxAttempts()) {
+                metrics.counter("ledger.webhook.dead.letters").increment();
+            }
+        }
         return true;
     }
 

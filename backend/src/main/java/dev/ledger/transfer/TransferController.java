@@ -9,6 +9,12 @@ import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 
 @RestController
 @RequestMapping("/api/transfers")
@@ -22,7 +28,20 @@ public class TransferController {
     }
 
     @PostMapping
-    public ResponseEntity<String> create(@RequestHeader(value = "Idempotency-Key", required = false) String key,
+    @Operation(summary = "Create or replay a transfer", description = "The same key and payload returns the original status and body. "
+            + "An unknown outcome must be retried with the same key. A new key represents a new movement.")
+    @ApiResponse(responseCode = "201", description = "Created, or replay of the original creation",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = TransferResponse.class)),
+            headers = {@Header(name = "Idempotency-Replayed", schema = @Schema(type = "boolean")),
+                    @Header(name = "Location", schema = @Schema(type = "string"))})
+    @ApiResponse(responseCode = "400", description = "Invalid request or missing key", content = @Content(mediaType = "application/problem+json"))
+    @ApiResponse(responseCode = "404", description = "Account not found; response is cached", content = @Content(mediaType = "application/problem+json"))
+    @ApiResponse(responseCode = "409", description = "Key is in progress; retry the same request after one second",
+            headers = @Header(name = "Retry-After", schema = @Schema(type = "integer", example = "1")),
+            content = @Content(mediaType = "application/problem+json"))
+    @ApiResponse(responseCode = "422", description = "Business rejection or key reused with a different payload", content = @Content(mediaType = "application/problem+json"))
+    public ResponseEntity<String> create(@Parameter(required = true, description = "1–128 letters, digits, dots, underscores, colons or hyphens", example = "demo-transfer-001")
+            @RequestHeader(value = "Idempotency-Key", required = false) String key,
             @Valid @RequestBody CreateTransferRequest request) {
         var response = idempotentTransfers.create(key, request);
         var result = ResponseEntity.status(response.status())

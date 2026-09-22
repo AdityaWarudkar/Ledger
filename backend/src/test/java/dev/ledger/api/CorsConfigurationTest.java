@@ -23,6 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class CorsConfigurationTest {
     @Autowired MockMvc mvc;
     @MockitoBean AccountService accounts;
+    @MockitoBean io.micrometer.core.instrument.MeterRegistry metrics;
 
     @Test
     void acceptsConfiguredOriginsAndIdempotencyPreflightHeaders() throws Exception {
