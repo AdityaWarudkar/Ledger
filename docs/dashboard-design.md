@@ -1,6 +1,6 @@
 # Dashboard design proposal
 
-Status: awaiting approval before frontend implementation.
+Status: implemented. The instruction to proceed to Phase 7 approved this direction.
 
 The dashboard is a working ledger console. Most of the screen belongs to rows,
 amounts, and useful actions. A fixed sidebar supplies context; the main area

@@ -1,0 +1,31 @@
+{
+  "name": "ledger-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test",
+    "test:demo": "node scripts/demo-smoke.mjs",
+    "format": "prettier --write src tests scripts *.ts *.mjs",
+    "format:check": "prettier --check src tests scripts *.ts *.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.103.2",
+    "next": "16.3.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "26.6.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "prettier": "3.9.8",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2"
+  }
+}
